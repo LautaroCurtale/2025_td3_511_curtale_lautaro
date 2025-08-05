@@ -2,6 +2,7 @@
 #define _RTC_H_
 
 #include <stdio.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 
@@ -20,12 +21,12 @@
 
 // Address
 #define RTC_ADD 0x68
-#define EEPROM_ADDR 0x57  // Ajusta según tu módulo
+#define EEPROM_ADDR 0x57  // Ajusta segï¿½n tu mï¿½dulo
 #define EEPROM_SIZE 4096  // Bytes totales (32Kbit = 4KB)
 #define EEPROM_ADDR_CONFIG   0x0000
 #define EEPROM_ADDR_RESULT   0x0100
 #define EEPROM_MAX_RESULTS   128  // suponiendo 4KB / sizeof(resultado_t)
-#define EEPROM_PTR_ADDR      0x00F0  // Dirección especial para índice circular
+#define EEPROM_PTR_ADDR      0x00F0  // Direcciï¿½n especial para ï¿½ndice circular
 
 typedef struct {
     uint16_t year;
@@ -36,6 +37,21 @@ typedef struct {
     uint8_t minute;
     uint8_t second;
 } time_t;
+
+typedef struct {
+    float setpoint;
+    float pendiente;
+    bool tipo_entrada; // 0 = escalÃ³n, 1 = rampa
+    time_t fecha;
+} configuracion_t;
+
+typedef struct {
+    float angulo;
+    float setpoint;
+    float salida_control;
+    bool flag_led;
+    time_t fecha;
+} resultado_t;
 
 void rtc_init(i2c_inst_t *i2c);
 void rtc_set_time(time_t time);

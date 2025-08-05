@@ -5,8 +5,6 @@
 #include <stdint.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
-#include "hardware/adc.h"
-#include "hardware/irq.h"
 
 #define AS5600_ADDRESS 0x36
 #define AS5600_DIR_PORT 0 

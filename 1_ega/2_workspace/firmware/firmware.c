@@ -44,21 +44,6 @@
 #define PWM_FRECUENCIA 10000
 
 typedef struct {
-    float setpoint;
-    float pendiente;
-    bool tipo_entrada; // 0 = escalón, 1 = rampa
-    fecha_hora_t fecha;
-} configuracion_t;
-
-typedef struct {
-    float angulo;
-    float setpoint;
-    float salida_control;
-    bool flag_led;
-    fecha_hora_t fecha;
-} resultado_t;
-
-typedef struct {
     char linea1[17];
     char linea2[17];
 } lcd_msg_t;
@@ -125,7 +110,7 @@ void task_control_pid(void *params) {
         }
 
         salida = fmaxf(fminf(salida, 100.0f), -100.0f);
-        set_motor_pwm(salida);
+        pwm_user_init(ENA, salida);
         xQueueOverwrite(q_pid, &salida);
         error_prev = error;
 
@@ -161,7 +146,7 @@ void task_datalogger(void *params) {
             xQueuePeek(q_pid, &res.salida_control, 0);
             res.setpoint = configuracion_actual.setpoint;
             res.flag_led = true;
-            obtener_fecha_hora(&res.fecha);
+            res.fecha = rtc_get_time();
             guardar_resultado(&res);
             guardado = true;
         }
@@ -179,7 +164,7 @@ void task_keyboard(void *params) {
 
     while (1) {
         if (xSemaphoreTake(semaforo_teclado, portMAX_DELAY)) {
-            char tecla = tecla_presionada;
+            char tecla = keypad_esperar_tecla();
             lcd_msg_t msg;
 
             if (estado_menu == 0) {
@@ -227,7 +212,7 @@ void task_keyboard(void *params) {
                     else
                         configuracion_actual.pendiente = fminf(valor, 30.0f);
 
-                    obtener_fecha_hora(&configuracion_actual.fecha);
+                    configuracion_actual.fecha = rtc_get_time();
                     guardar_configuracion(&configuracion_actual);
                     snprintf(msg.linea1, 17, "Guardado!");
                     msg.linea2[0] = 0;
@@ -266,9 +251,15 @@ void task_init(void *params) {
     q_flag_led = xQueueCreate(1, sizeof(bool));
     semaforo_teclado = xSemaphoreCreateBinary();
 
-    Teclado_init((uint8_t[]){FILA_1, FILA_2, FILA_3, FILA_4},
-                 (uint8_t[]){COL_1, COL_2, COL_3, COL_4},
-                 4, 4, &semaforo_teclado);
+    for (int i = 0; i < 4; i++) {
+        gpio_init(COLUMNA_1 + i);
+        gpio_set_dir(COLUMNA_1 + i, GPIO_OUT);
+        gpio_put(COLUMNA_1 + i, 1);  // columnas inactivas inicialmente
+
+        gpio_init(FILA_1 + i);
+        gpio_set_dir(FILA_1 + i, GPIO_IN);
+        gpio_pull_up(FILA_1 + i);    // pull-up para detectar cuando bajan
+    }
 
     vTaskDelete(NULL);
 }
