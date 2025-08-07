@@ -36,7 +36,6 @@ pico_sdk_init()
 # Add external libraries
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../freertos ${CMAKE_BINARY_DIR}/freertos)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../lcd ${CMAKE_BINARY_DIR}/lcd)
-add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../helper ${CMAKE_BINARY_DIR}/helper)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../bmp280 ${CMAKE_BINARY_DIR}/bmp280)
 
 # Add executable. Default name is the project name, version 0.1
@@ -55,8 +54,9 @@ target_link_libraries(firmware
         pico_stdlib
         freertos
         lcd
-        helper
-        bmp280)
+        bmp280
+        hardware/pwm
+)
 
 # Add the standard include files to the build
 target_include_directories(firmware PRIVATE
