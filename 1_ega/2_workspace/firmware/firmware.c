@@ -53,6 +53,39 @@ QueueHandle_t q_tecla, q_lcd, q_angulo, q_pid, q_flag_led;
 SemaphoreHandle_t semaforo_teclado;
 configuracion_t configuracion_actual = {90.0f, 10.0f, 0};
 
+// Variables
+volatile uint8_t tecla_presionada = 0;
+volatile bool tecla_leida = false;
+int filas[3];
+int columnas[3];
+
+// Tabla de teclas
+const char teclado[4][4] = {
+    {'1','2','3','A'},
+    {'4','5','6','B'},
+    {'7','8','9','C'},
+    {'*','0','#','D'}
+};
+
+// ------------ IRQ teclado -----------------
+
+void gpio_irq_handler(uint gpio, uint32_t events) {
+    for (int f = 0; f < 4; f++) {
+        if (gpio == filas[f]) {
+            for (int c = 0; c < 4; c++) {
+                gpio_put(columnas[c], 0);
+                sleep_us(3);
+                if (!gpio_get(filas[f])) {
+                    tecla_presionada = teclado[f][c];
+                    tecla_leida = true;
+                    xSemaphoreGiveFromISR(semaforo_teclado, NULL);
+                }
+                gpio_put(columnas[c], 1);
+            }
+        }
+    }
+}
+
 // Task: LCD
 void task_lcd(void *params) {
     lcd_msg_t msg;

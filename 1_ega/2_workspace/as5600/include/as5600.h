@@ -8,7 +8,7 @@
 
 #define AS5600_ADDRESS 0x36
 #define AS5600_DIR_PORT 0 
-#define AS5600_DIR_PIN  21
+#define AS5600_DIR_PIN  6
 
 extern uint8_t magnet_status, md, ml, mh;
 
