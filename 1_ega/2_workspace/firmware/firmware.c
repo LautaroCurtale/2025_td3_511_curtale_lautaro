@@ -4,6 +4,7 @@
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 #include "hardware/gpio.h"
+#include "hardware/pwm.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -44,8 +45,8 @@
 #define PWM_FRECUENCIA 10000
 
 typedef struct {
-    char linea1[17];
-    char linea2[17];
+    char linea1[16];
+    char linea2[16];
 } lcd_msg_t;
 
 // Globales
@@ -56,8 +57,11 @@ configuracion_t configuracion_actual = {90.0f, 10.0f, 0};
 // Variables
 volatile uint8_t tecla_presionada = 0;
 volatile bool tecla_leida = false;
-int filas[3];
-int columnas[3];
+int filas[4];
+int columnas[4];
+
+// Prototipo Funciones
+void set_motor_pwm(uint8_t gpio);
 
 // Tabla de teclas
 const char teclado[4][4] = {
@@ -77,7 +81,6 @@ void gpio_irq_handler(uint gpio, uint32_t events) {
                 sleep_us(3);
                 if (!gpio_get(filas[f])) {
                     tecla_presionada = teclado[f][c];
-                    tecla_leida = true;
                     xSemaphoreGiveFromISR(semaforo_teclado, NULL);
                 }
                 gpio_put(columnas[c], 1);
@@ -114,6 +117,7 @@ void task_control_pid(void *params) {
     float error_prev = 0.0f;
     float integral = 0.0f;
     int estable_count = 0;
+    set_motor_pwm(ENA);
 
     while (1) {
         float ang = 0, salida = 0;
@@ -143,7 +147,7 @@ void task_control_pid(void *params) {
         }
 
         salida = fmaxf(fminf(salida, 100.0f), -100.0f);
-        pwm_user_init(ENA, salida);
+        pwm_set_gpio_level(ENA, salida);
         xQueueOverwrite(q_pid, &salida);
         error_prev = error;
 
@@ -197,14 +201,14 @@ void task_keyboard(void *params) {
 
     while (1) {
         if (xSemaphoreTake(semaforo_teclado, portMAX_DELAY)) {
-            char tecla = keypad_esperar_tecla();
+            char tecla = tecla_presionada;
             lcd_msg_t msg;
 
             if (estado_menu == 0) {
                 switch (tecla) {
                     case 'A':
-                        snprintf(msg.linea1, 17, "Tipo de Salida:");
-                        snprintf(msg.linea2, 17, "1:Esc 2:Ram");
+                        snprintf(msg.linea1, 16, "Tipo de Salida:");
+                        snprintf(msg.linea2, 16, "1:Esc 2:Ram");
                         xQueueSend(q_lcd, &msg, 0);
                         estado_menu = 1;
                         break;
@@ -212,21 +216,21 @@ void task_keyboard(void *params) {
                         float ang;
                         xQueuePeek(q_angulo, &ang, 0);
                         float err = configuracion_actual.setpoint - ang;
-                        snprintf(msg.linea1, 17, "SP:%.1f VA:%.1f", configuracion_actual.setpoint, ang);
-                        snprintf(msg.linea2, 17, "Err:%.1f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
+                        snprintf(msg.linea1, 16, "SP:%.1f VA:%.1f", configuracion_actual.setpoint, ang);
+                        snprintf(msg.linea2, 16, "Err:%.1f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                     }
                     case 'C':
-                        snprintf(msg.linea1, 17, "Salida:%c", configuracion_actual.tipo_entrada ? 'R' : 'E');
-                        snprintf(msg.linea2, 17, "SP:%.1f P:%.1f", configuracion_actual.setpoint, configuracion_actual.pendiente);
+                        snprintf(msg.linea1, 16, "Salida:%c", configuracion_actual.tipo_entrada ? 'R' : 'E');
+                        snprintf(msg.linea2, 16, "SP:%.1f P:%.1f", configuracion_actual.setpoint, configuracion_actual.pendiente);
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                 }
             } else if (estado_menu == 1) {
                 if (tecla == '1' || tecla == '2') {
                     configuracion_actual.tipo_entrada = tecla == '2';
-                    snprintf(msg.linea1, 17, tecla == '1' ? "Setpoint:" : "Pendiente:");
+                    snprintf(msg.linea1, 16, tecla == '1' ? "Setpoint:" : "Pendiente:");
                     msg.linea2[0] = 0;
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = (tecla == '1') ? 2 : 3;
@@ -237,7 +241,7 @@ void task_keyboard(void *params) {
                 if (tecla >= '0' && tecla <= '9' && digitos < 3) {
                     valor = valor * 10 + (tecla - '0');
                     digitos++;
-                    snprintf(msg.linea2, 17, "%.0f", valor);
+                    snprintf(msg.linea2, 16, "%.0f", valor);
                     xQueueSend(q_lcd, &msg, 0);
                 } else if (tecla == '#') {
                     if (estado_menu == 2)
@@ -247,12 +251,12 @@ void task_keyboard(void *params) {
 
                     configuracion_actual.fecha = rtc_get_time();
                     guardar_configuracion(&configuracion_actual);
-                    snprintf(msg.linea1, 17, "Guardado!");
+                    snprintf(msg.linea1, 16, "Guardado!");
                     msg.linea2[0] = 0;
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
                 } else if (tecla == '*') {
-                    snprintf(msg.linea1, 17, "Cancelado");
+                    snprintf(msg.linea1, 16, "Cancelado");
                     msg.linea2[0] = 0;
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
@@ -308,4 +312,16 @@ int main() {
     xTaskCreate(task_datalogger, "Datalogger", 2048, NULL, 1, NULL);
     vTaskStartScheduler();
     while (1);
+}
+
+
+void set_motor_pwm(uint8_t gpio) {
+    // Asigna función de PWM
+    gpio_set_function(gpio, GPIO_FUNC_PWM);
+    // Configura frecuencia de PWM e inicializa
+    uint32_t slice = pwm_gpio_to_slice_num(gpio);
+    pwm_set_clkdiv(slice, frequency_count_khz(CLOCKS_FC0_SRC_VALUE_CLK_SYS) / 1000.0);
+    pwm_set_wrap(slice, 1000000 / PWM_FRECUENCIA);
+    pwm_set_gpio_level(gpio, 500000 / PWM_FRECUENCIA);
+    pwm_set_enabled(slice, true);
 }
