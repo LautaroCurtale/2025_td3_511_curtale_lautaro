@@ -16,8 +16,6 @@
 #define KEYPAD_ROWS 4
 #define KEYPAD_COLS 4
 
-#define MAX_HORARIOS 4
-
 typedef struct {
     uint8_t row_start;
     uint8_t row_end;

@@ -54,12 +54,6 @@ QueueHandle_t q_tecla, q_lcd, q_angulo, q_pid, q_flag_led;
 SemaphoreHandle_t semaforo_teclado;
 configuracion_t configuracion_actual = {90.0f, 10.0f, 0};
 
-// Variables
-volatile uint8_t tecla_presionada = 0;
-volatile bool tecla_leida = false;
-int filas[4];
-int columnas[4];
-
 // Prototipo Funciones
 void set_motor_pwm(uint8_t gpio);
 
@@ -71,28 +65,65 @@ const char teclado[4][4] = {
     {'*','0','#','D'}
 };
 
-// ------------ IRQ teclado -----------------
+typedef enum {
+    I2C_LCD,
+    I2C_ENCODER,
+    I2C_RTC,
+    I2C_EEPROM_SAVE_CONF,
+    I2C_EEPROM_SAVE_RESULT,
+    I2C_EEPROM_LOAD_CONF,
+    I2C_EEPROM_LOAD_RESULT
+} i2c_dev_t;
 
-void gpio_irq_handler(uint gpio, uint32_t events) {
-    for (int f = 0; f < 4; f++) {
-        if (gpio == filas[f]) {
-            for (int c = 0; c < 4; c++) {
-                gpio_put(columnas[c], 0);
-                sleep_us(3);
-                if (!gpio_get(filas[f])) {
-                    tecla_presionada = teclado[f][c];
-                    xSemaphoreGiveFromISR(semaforo_teclado, NULL);
+typedef struct {
+    i2c_dev_t dispositivo;
+    void *data_in;    // Datos a enviar (si aplica)
+    void *data_out;   // Buffer para leer datos (si aplica)
+    SemaphoreHandle_t done; // Semáforo para esperar respuesta
+} i2c_guard_t;
+
+QueueHandle_t q_i2c_guard;
+
+
+void task_i2c_guard(void *params) {
+    i2c_guard_t req;
+
+    while (1) {
+        if (xQueueReceive(q_i2c_guard, &req, portMAX_DELAY)) {
+            switch (req.dispositivo) {
+
+                case I2C_LCD: {
+                    lcd_msg_t *msg = (lcd_msg_t*)req.data_in;
+                    lcd_clear();
+                    lcd_set_cursor(0, 0); lcd_string(msg->linea1);
+                    lcd_set_cursor(1, 0); lcd_string(msg->linea2);
+                    break;
                 }
-                gpio_put(columnas[c], 1);
+
+                case I2C_ENCODER: {
+                    float *ang = (float*)req.data_out;
+                    *ang = (float)get_angle_position();  // Usa funciones internas del as5600.c
+                    break;
+                }
             }
+
+            if (req.done)
+                xSemaphoreGive(req.done);
         }
     }
 }
-
+/*
 // Task: LCD
 void task_lcd(void *params) {
+    bool primer = false;
     lcd_msg_t msg;
     while (1) {
+        if (xQueueReceive(q_lcd, &msg, 0) == pdFALSE && primer == false){
+            primer = true;
+            lcd_clear();
+            snprintf(msg.linea1, 16, "Bienvenido");
+            lcd_set_cursor(0, 0); lcd_string(msg.linea1);
+        }
         if (xQueueReceive(q_lcd, &msg, portMAX_DELAY)) {
             lcd_clear();
             lcd_set_cursor(0, 0); lcd_string(msg.linea1);
@@ -100,8 +131,25 @@ void task_lcd(void *params) {
         }
     }
 }
+*/
+// Task: LCD
+void task_lcd(void *params) {
+    lcd_msg_t msg;
+    while (1) {
+        if (xQueueReceive(q_lcd, &msg, portMAX_DELAY)) {
+            i2c_guard_t req = {
+                .dispositivo = I2C_LCD,
+                .data_in = &msg,
+                .done = NULL
+            };
+            xQueueSend(q_i2c_guard, &req, portMAX_DELAY);
+        }
+    }
+}
+
 
 // Task: Encoder
+/*
 void task_encoder(void *params) {
     while (1) {
         float ang = (float)get_angle_position();
@@ -109,7 +157,27 @@ void task_encoder(void *params) {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
+*/
 
+void task_encoder(void *params) {
+    while (1) {
+        float ang = 0;
+        SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+        i2c_guard_t req = {
+            .dispositivo = I2C_ENCODER,
+            .data_out = &ang,
+            .done = sem
+        };
+        xQueueSend(q_i2c_guard, &req, portMAX_DELAY);
+        xSemaphoreTake(sem, portMAX_DELAY);
+        vSemaphoreDelete(sem);
+
+        xQueueOverwrite(q_angulo, &ang);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+}
+
+/*
 // Task: PID
 void task_control_pid(void *params) {
     float kp_pi = 1.0f, ki = 0.1f;
@@ -192,7 +260,7 @@ void task_datalogger(void *params) {
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
-
+*/
 // Task: Teclado
 void task_keyboard(void *params) {
     static char estado_menu = 0;
@@ -200,8 +268,7 @@ void task_keyboard(void *params) {
     static int digitos = 0;
 
     while (1) {
-        if (xSemaphoreTake(semaforo_teclado, portMAX_DELAY)) {
-            char tecla = tecla_presionada;
+            char tecla = keypad_esperar_tecla();
             lcd_msg_t msg;
 
             if (estado_menu == 0) {
@@ -213,14 +280,31 @@ void task_keyboard(void *params) {
                         estado_menu = 1;
                         break;
                     case 'B': {
-                        float ang;
-                        xQueuePeek(q_angulo, &ang, 0);
-                        float err = configuracion_actual.setpoint - ang;
-                        snprintf(msg.linea1, 16, "SP:%.1f VA:%.1f", configuracion_actual.setpoint, ang);
-                        snprintf(msg.linea2, 16, "Err:%.1f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
-                        xQueueSend(q_lcd, &msg, 0);
-                        break;
-                    }
+    // Entrar en modo monitor hasta que se presione '*'
+    while (1) {
+        float ang;
+        xQueuePeek(q_angulo, &ang, 0);
+        float err = configuracion_actual.setpoint - ang;
+
+        snprintf(msg.linea1, 16, "SP:%f VA:%.1f", configuracion_actual.setpoint, ang);
+        snprintf(msg.linea2, 16, "Err:%.1f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
+        xQueueSend(q_lcd, &msg, 0);
+
+        // Esperar 200 ms (igual que el muestreo del ángulo)
+        vTaskDelay(pdMS_TO_TICKS(200));
+
+        // Revisar si se presionó alguna tecla para salir
+        char salida = keypad_obtener_tecla((index_row_col){0, 3, 0, 3});
+        if (salida != '\0') {
+            // Esperar a que se suelte la tecla antes de salir
+            while (keypad_obtener_tecla((index_row_col){0, 3, 0, 3}) != '\0') {
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+            break; // salir del modo monitor
+        }
+    }
+    break;
+}
                     case 'C':
                         snprintf(msg.linea1, 16, "Salida:%c", configuracion_actual.tipo_entrada ? 'R' : 'E');
                         snprintf(msg.linea2, 16, "SP:%.1f P:%.1f", configuracion_actual.setpoint, configuracion_actual.pendiente);
@@ -249,8 +333,8 @@ void task_keyboard(void *params) {
                     else
                         configuracion_actual.pendiente = fminf(valor, 30.0f);
 
-                    configuracion_actual.fecha = rtc_get_time();
-                    guardar_configuracion(&configuracion_actual);
+                    //configuracion_actual.fecha = rtc_get_time();
+                    //guardar_configuracion(&configuracion_actual);
                     snprintf(msg.linea1, 16, "Guardado!");
                     msg.linea2[0] = 0;
                     xQueueSend(q_lcd, &msg, 0);
@@ -262,7 +346,6 @@ void task_keyboard(void *params) {
                     estado_menu = 0;
                 }
             }
-        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -286,6 +369,7 @@ void task_init(void *params) {
     q_angulo = xQueueCreate(1, sizeof(float));
     q_pid = xQueueCreate(1, sizeof(float));
     q_flag_led = xQueueCreate(1, sizeof(bool));
+    q_i2c_guard = xQueueCreate(4, sizeof(i2c_guard_t));
     semaforo_teclado = xSemaphoreCreateBinary();
 
     for (int i = 0; i < 4; i++) {
@@ -303,13 +387,14 @@ void task_init(void *params) {
 
 int main() {
     stdio_init_all();
-    xTaskCreate(task_init, "Init", 1024, NULL, 3, NULL);
-    xTaskCreate(task_lcd, "LCD", 1024, NULL, 1, NULL);
-    xTaskCreate(task_keyboard, "Keyboard", 2048, NULL, 2, NULL);
+    xTaskCreate(task_init, "Init", 1024, NULL, 4, NULL);
+    xTaskCreate(task_lcd, "LCD", 2048, NULL, 2, NULL);
+    xTaskCreate(task_keyboard, "Keyboard", 2048, NULL, 1, NULL);
+    xTaskCreate(task_i2c_guard, "I2C_Guard", 2048, NULL, 3, NULL);
     xTaskCreate(task_encoder, "Encoder", 1024, NULL, 2, NULL);
-    xTaskCreate(task_control_pid, "PID", 2048, NULL, 2, NULL);
-    xTaskCreate(task_flags, "Flags", 1024, NULL, 1, NULL);
-    xTaskCreate(task_datalogger, "Datalogger", 2048, NULL, 1, NULL);
+    //xTaskCreate(task_control_pid, "PID", 2048, NULL, 2, NULL);
+    //xTaskCreate(task_flags, "Flags", 1024, NULL, 1, NULL);
+    //xTaskCreate(task_datalogger, "Datalogger", 2048, NULL, 1, NULL);
     vTaskStartScheduler();
     while (1);
 }

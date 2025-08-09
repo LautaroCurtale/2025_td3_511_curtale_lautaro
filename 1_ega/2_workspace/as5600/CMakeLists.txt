@@ -7,8 +7,8 @@ add_library(as5600 STATIC
 target_link_libraries(as5600
     pico_stdlib
     hardware_i2c
-    hardware/adc
-    hardware/irq
+    hardware_adc
+    hardware_irq
 )
 
 # Incluir las cabeceras de la biblioteca

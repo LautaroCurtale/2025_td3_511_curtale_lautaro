@@ -8,7 +8,7 @@ char keypad_obtener_tecla(index_row_col index) {
 
         for (uint8_t row = index.row_start; row <= index.row_end; row++) {
             if (gpio_get(FILA_1 + row) == 0) {
-                sleep_ms(50); // debounce
+                sleep_ms(200); // debounce
                 if (gpio_get(FILA_1 + row) == 0) {
                     gpio_put(COLUMNA_1 + col, 1); // restaurar columna
                     return KEYPAD_MAP[row][col];
