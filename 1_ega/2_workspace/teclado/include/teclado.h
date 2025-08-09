@@ -5,14 +5,15 @@
 #include <stdint.h>
 #include "hardware/i2c.h"
 
+// Teclado
 #define FILA_1 8
 #define FILA_2 9
 #define FILA_3 10
 #define FILA_4 11
-#define COLUMNA_1 12
-#define COLUMNA_2 13
-#define COLUMNA_3 14
-#define COLUMNA_4 15
+#define COL_1  12
+#define COL_2  13
+#define COL_3  14
+#define COL_4  15
 #define KEYPAD_ROWS 4
 #define KEYPAD_COLS 4
 
@@ -32,5 +33,5 @@ static const char KEYPAD_MAP[KEYPAD_ROWS][KEYPAD_COLS] = {
 
 char keypad_esperar_tecla(void);
 char keypad_obtener_tecla(index_row_col index);
-int keypad_esperar_numero(int digitos);
+char keypad_leer_tecla_no_bloq(void);
 #endif /* DEFINICIONES_H_ */

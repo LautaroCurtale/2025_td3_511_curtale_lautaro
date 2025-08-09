@@ -42,6 +42,14 @@
 #define COL_3  14
 #define COL_4  15
 
+// Tabla de teclas
+static const char teclado[4][4] = {
+    {'1','2','3','A'},
+    {'4','5','6','B'},
+    {'7','8','9','C'},
+    {'*','0','#','D'}
+};
+
 #define PWM_FRECUENCIA 10000
 
 typedef struct {
@@ -56,14 +64,8 @@ configuracion_t configuracion_actual = {90.0f, 10.0f, 0};
 
 // Prototipo Funciones
 void set_motor_pwm(uint8_t gpio);
-
-// Tabla de teclas
-const char teclado[4][4] = {
-    {'1','2','3','A'},
-    {'4','5','6','B'},
-    {'7','8','9','C'},
-    {'*','0','#','D'}
-};
+void motor_sentido_antihorario();
+void motor_sentido_horario();
 
 typedef enum {
     I2C_LCD,
@@ -83,6 +85,7 @@ typedef struct {
 } i2c_guard_t;
 
 QueueHandle_t q_i2c_guard;
+QueueHandle_t q_pid_enable;
 
 
 void task_i2c_guard(void *params) {
@@ -112,8 +115,9 @@ void task_i2c_guard(void *params) {
         }
     }
 }
-/*
+
 // Task: LCD
+/*
 void task_lcd(void *params) {
     bool primer = false;
     lcd_msg_t msg;
@@ -147,7 +151,6 @@ void task_lcd(void *params) {
     }
 }
 
-
 // Task: Encoder
 /*
 void task_encoder(void *params) {
@@ -177,7 +180,7 @@ void task_encoder(void *params) {
     }
 }
 
-/*
+
 // Task: PID
 void task_control_pid(void *params) {
     float kp_pi = 1.0f, ki = 0.1f;
@@ -185,9 +188,22 @@ void task_control_pid(void *params) {
     float error_prev = 0.0f;
     float integral = 0.0f;
     int estable_count = 0;
+    bool pid_enable = false;
+
     set_motor_pwm(ENA);
 
     while (1) {
+        // Chequea si hay señal para habilitar el PID
+        bool cmd;
+        if (xQueueReceive(q_pid_enable, &cmd, 0)) {
+            pid_enable = cmd;
+        }
+
+        if (!pid_enable) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
         float ang = 0, salida = 0;
         xQueuePeek(q_angulo, &ang, 0);
 
@@ -215,14 +231,32 @@ void task_control_pid(void *params) {
         }
 
         salida = fmaxf(fminf(salida, 100.0f), -100.0f);
-        pwm_set_gpio_level(ENA, salida);
+
+        if (salida > 0) {
+            gpio_put(IN1, 0);
+            gpio_put(IN2, 0);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            motor_sentido_horario();        // CW
+            pwm_set_gpio_level(ENA, salida);
+        } else if (salida < 0) {
+            gpio_put(IN1, 0);
+            gpio_put(IN2, 0);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            motor_sentido_antihorario();    // CCW
+            pwm_set_gpio_level(ENA, -salida);
+        } else {
+            gpio_put(IN1, 0);
+            gpio_put(IN2, 0);
+            pwm_set_gpio_level(ENA, 0);
+        }
         xQueueOverwrite(q_pid, &salida);
         error_prev = error;
 
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
 
+/*
 // Task: Flags (LEDs)
 void task_flags(void *params) {
     while (1) {
@@ -264,8 +298,10 @@ void task_datalogger(void *params) {
 // Task: Teclado
 void task_keyboard(void *params) {
     static char estado_menu = 0;
-    static float valor = 0;
-    static int digitos = 0;
+    static float valorset = 0.0f;
+    static float valorpend = 0.0f;
+    static int digitsp = 0;
+    static int digitpend = 0;
 
     while (1) {
             char tecla = keypad_esperar_tecla();
@@ -275,67 +311,49 @@ void task_keyboard(void *params) {
                 switch (tecla) {
                     case 'A':
                         snprintf(msg.linea1, 16, "Tipo de Salida:");
-                        snprintf(msg.linea2, 16, "1:Esc 2:Ram");
+                        snprintf(msg.linea2, 16, "A:Esc B:Ram");
                         xQueueSend(q_lcd, &msg, 0);
                         estado_menu = 1;
                         break;
-                    case 'B': {
-    // Entrar en modo monitor hasta que se presione '*'
-    while (1) {
-        float ang;
-        xQueuePeek(q_angulo, &ang, 0);
-        float err = configuracion_actual.setpoint - ang;
-
-        snprintf(msg.linea1, 16, "SP:%f VA:%.1f", configuracion_actual.setpoint, ang);
-        snprintf(msg.linea2, 16, "Err:%.1f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
-        xQueueSend(q_lcd, &msg, 0);
-
-        // Esperar 200 ms (igual que el muestreo del ángulo)
-        vTaskDelay(pdMS_TO_TICKS(200));
-
-        // Revisar si se presionó alguna tecla para salir
-        char salida = keypad_obtener_tecla((index_row_col){0, 3, 0, 3});
-        if (salida != '\0') {
-            // Esperar a que se suelte la tecla antes de salir
-            while (keypad_obtener_tecla((index_row_col){0, 3, 0, 3}) != '\0') {
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-            break; // salir del modo monitor
-        }
-    }
-    break;
-}
+                    case 'B':
+                        estado_menu = 5; // estado de monitoreo
+                        break;
                     case 'C':
                         snprintf(msg.linea1, 16, "Salida:%c", configuracion_actual.tipo_entrada ? 'R' : 'E');
-                        snprintf(msg.linea2, 16, "SP:%.1f P:%.1f", configuracion_actual.setpoint, configuracion_actual.pendiente);
+                        snprintf(msg.linea2, 16, "SP:%.0f P:%.0f", configuracion_actual.setpoint, configuracion_actual.pendiente);
+                        xQueueSend(q_lcd, &msg, 0);
+                        break;
+                    case '*': 
+                        bool enable = true;
+                        xQueueOverwrite(q_pid_enable, &enable);
+                        snprintf(msg.linea1, 16, "PID Activado");
+                        msg.linea2[0] = 0;
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                 }
             } else if (estado_menu == 1) {
-                if (tecla == '1' || tecla == '2') {
-                    configuracion_actual.tipo_entrada = tecla == '2';
-                    snprintf(msg.linea1, 16, tecla == '1' ? "Setpoint:" : "Pendiente:");
+                if (tecla == 'A' || tecla == 'B') {
+                    configuracion_actual.tipo_entrada = tecla == 'B';
+                    snprintf(msg.linea1, 16, "Setpoint:");
                     msg.linea2[0] = 0;
                     xQueueSend(q_lcd, &msg, 0);
-                    estado_menu = (tecla == '1') ? 2 : 3;
-                    valor = 0;
-                    digitos = 0;
+                    estado_menu = (tecla == 'A') ? 2 : 3;
+                    valorset = 0;
+                    digitsp = 0;
+
                 }
-            } else if (estado_menu == 2 || estado_menu == 3) {
-                if (tecla >= '0' && tecla <= '9' && digitos < 3) {
-                    valor = valor * 10 + (tecla - '0');
-                    digitos++;
-                    snprintf(msg.linea2, 16, "%.0f", valor);
+            } else if (estado_menu == 2) {
+                if (tecla >= '0' && tecla <= '9' && digitsp < 3) {
+                    valorset = valorset * 10 + (tecla - '0');
+                    digitsp++;
+                    snprintf(msg.linea2, 16, "%.0f", valorset);
                     xQueueSend(q_lcd, &msg, 0);
                 } else if (tecla == '#') {
-                    if (estado_menu == 2)
-                        configuracion_actual.setpoint = fminf(valor, 360.0f);
-                    else
-                        configuracion_actual.pendiente = fminf(valor, 30.0f);
-
+                    configuracion_actual.setpoint = fminf(valorset, 360.0f);
+                    configuracion_actual.pendiente = 0;
                     //configuracion_actual.fecha = rtc_get_time();
                     //guardar_configuracion(&configuracion_actual);
-                    snprintf(msg.linea1, 16, "Guardado!");
+                    snprintf(msg.linea1, 16, "Guardado");
                     msg.linea2[0] = 0;
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
@@ -345,10 +363,72 @@ void task_keyboard(void *params) {
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
                 }
+            } else if (estado_menu == 3) {
+                if (tecla >= '0' && tecla <= '9' && digitsp < 3) {
+                    valorset = valorset * 10 + (tecla - '0');
+                    digitsp++;
+                    snprintf(msg.linea2, 16, "%.0f", valorset);
+                    xQueueSend(q_lcd, &msg, 0);
+                } else if (tecla == '#') {
+                    if (estado_menu == 3){
+                    snprintf(msg.linea1, 16, "Pendiente:");
+                    msg.linea2[0] = 0;
+                    xQueueSend(q_lcd, &msg, 0);
+                    valorpend = 0;
+                    digitpend = 0;
+                    estado_menu = 4;
+                    }
+                } else if (tecla == '*') {
+                    snprintf(msg.linea1, 16, "Cancelado");
+                    msg.linea2[0] = 0;
+                    xQueueSend(q_lcd, &msg, 0);
+                    estado_menu = 0;
+                }
+            } else if (estado_menu == 4) {
+                    if (tecla >= '0' && tecla <= '9' && digitpend < 3) {
+                    valorpend = valorpend * 10 + (tecla - '0');
+                    digitpend++;
+                    snprintf(msg.linea2, 16, "%.0f", valorpend);
+                    xQueueSend(q_lcd, &msg, 0);
+                    } else if (tecla == '#') {
+                    configuracion_actual.setpoint = fminf(valorset, 360.0f);
+                    configuracion_actual.pendiente = fminf(valorpend, 30.0f);
+                    //configuracion_actual.fecha = rtc_get_time();
+                    //guardar_configuracion(&configuracion_actual);
+                    snprintf(msg.linea1, 16, "Guardado");
+                    msg.linea2[0] = 0;
+                    xQueueSend(q_lcd, &msg, 0);
+                    estado_menu = 0;
+                    } else if (tecla == '*') {
+                    if (configuracion_actual.pendiente == 0)
+                    configuracion_actual.tipo_entrada = 'E';
+                    snprintf(msg.linea1, 16, "Cancelado");
+                    msg.linea2[0] = 0;
+                    xQueueSend(q_lcd, &msg, 0);
+                    estado_menu = 0;
+                }
+            } else if (estado_menu == 5) {
+                float ang;
+                lcd_msg_t msg;
+
+                // leer ángulo y mostrar
+                xQueuePeek(q_angulo, &ang, 0);
+                float err = configuracion_actual.setpoint - ang;
+                snprintf(msg.linea1, 16, "SP:%.0f VA:%.0f", configuracion_actual.setpoint, ang);
+                snprintf(msg.linea2, 16, "Err:%.0f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
+                xQueueSend(q_lcd, &msg, 0);
+
+                // lectura no bloqueante del teclado
+                char tecla = keypad_leer_tecla_no_bloq();
+                if (tecla != '\0') {
+                    estado_menu = 0; // salir del monitoreo
+                }
+                vTaskDelay(pdMS_TO_TICKS(200));
             }
+
+        }
         vTaskDelay(pdMS_TO_TICKS(50));
     }
-}
 
 // Task Init
 void task_init(void *params) {
@@ -359,6 +439,16 @@ void task_init(void *params) {
     gpio_init(DIR); gpio_set_dir(DIR, GPIO_OUT); gpio_put(DIR, 0);
     gpio_init(LED_VERDE); gpio_set_dir(LED_VERDE, GPIO_OUT); gpio_put(LED_VERDE, 0);
     gpio_init(LED_ROJO);  gpio_set_dir(LED_ROJO,  GPIO_OUT); gpio_put(LED_ROJO,  0);
+    gpio_init(IN1);  gpio_set_dir(IN1,  GPIO_OUT); gpio_put(IN1,  0);
+    gpio_init(IN2);  gpio_set_dir(IN2,  GPIO_OUT); gpio_put(IN2,  0);
+    gpio_init(COL_1); gpio_set_dir(COL_1, GPIO_OUT); gpio_put(COL_1, 1);  // columnas inactivas inicialmente
+    gpio_init(COL_2); gpio_set_dir(COL_2, GPIO_OUT); gpio_put(COL_2, 1);  // columnas inactivas inicialmente
+    gpio_init(COL_3); gpio_set_dir(COL_3, GPIO_OUT); gpio_put(COL_3, 1);  // columnas inactivas inicialmente
+    gpio_init(COL_4); gpio_set_dir(COL_4, GPIO_OUT); gpio_put(COL_4, 1);  // columnas inactivas inicialmente
+    gpio_init(FILA_1); gpio_set_dir(FILA_1, GPIO_IN); gpio_pull_up(FILA_1);
+    gpio_init(FILA_2); gpio_set_dir(FILA_2, GPIO_IN); gpio_pull_up(FILA_2);
+    gpio_init(FILA_3); gpio_set_dir(FILA_3, GPIO_IN); gpio_pull_up(FILA_3);
+    gpio_init(FILA_4); gpio_set_dir(FILA_4, GPIO_IN); gpio_pull_up(FILA_4);
 
     lcd_init(I2C_PORT, LCD_ADD);
     lcd_clear();
@@ -370,17 +460,8 @@ void task_init(void *params) {
     q_pid = xQueueCreate(1, sizeof(float));
     q_flag_led = xQueueCreate(1, sizeof(bool));
     q_i2c_guard = xQueueCreate(4, sizeof(i2c_guard_t));
+    q_pid_enable = xQueueCreate(1, sizeof(bool));
     semaforo_teclado = xSemaphoreCreateBinary();
-
-    for (int i = 0; i < 4; i++) {
-        gpio_init(COLUMNA_1 + i);
-        gpio_set_dir(COLUMNA_1 + i, GPIO_OUT);
-        gpio_put(COLUMNA_1 + i, 1);  // columnas inactivas inicialmente
-
-        gpio_init(FILA_1 + i);
-        gpio_set_dir(FILA_1 + i, GPIO_IN);
-        gpio_pull_up(FILA_1 + i);    // pull-up para detectar cuando bajan
-    }
 
     vTaskDelete(NULL);
 }
@@ -392,7 +473,7 @@ int main() {
     xTaskCreate(task_keyboard, "Keyboard", 2048, NULL, 1, NULL);
     xTaskCreate(task_i2c_guard, "I2C_Guard", 2048, NULL, 3, NULL);
     xTaskCreate(task_encoder, "Encoder", 1024, NULL, 2, NULL);
-    //xTaskCreate(task_control_pid, "PID", 2048, NULL, 2, NULL);
+    xTaskCreate(task_control_pid, "PID", 2048, NULL, 2, NULL);
     //xTaskCreate(task_flags, "Flags", 1024, NULL, 1, NULL);
     //xTaskCreate(task_datalogger, "Datalogger", 2048, NULL, 1, NULL);
     vTaskStartScheduler();
@@ -409,4 +490,14 @@ void set_motor_pwm(uint8_t gpio) {
     pwm_set_wrap(slice, 1000000 / PWM_FRECUENCIA);
     pwm_set_gpio_level(gpio, 500000 / PWM_FRECUENCIA);
     pwm_set_enabled(slice, true);
+}
+
+void motor_sentido_horario() {
+    gpio_put(IN1, 1);
+    gpio_put(IN2, 0);
+}
+
+void motor_sentido_antihorario() {
+    gpio_put(IN1, 0);
+    gpio_put(IN2, 1);
 }
