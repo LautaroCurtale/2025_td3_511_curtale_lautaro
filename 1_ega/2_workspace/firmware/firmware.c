@@ -316,7 +316,14 @@ void task_keyboard(void *params) {
                         estado_menu = 1;
                         break;
                     case 'B':
-                        estado_menu = 5; // estado de monitoreo
+                        float ang;
+                        lcd_msg_t msg;
+                        // leer ángulo y mostrar
+                        xQueuePeek(q_angulo, &ang, 0);
+                        float err = configuracion_actual.setpoint - ang;
+                        snprintf(msg.linea1, 16, "SP:%.0f VA:%.0f", configuracion_actual.setpoint, ang);
+                        snprintf(msg.linea2, 16, "Err:%.0f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
+                        xQueueSend(q_lcd, &msg, 0);
                         break;
                     case 'C':
                         snprintf(msg.linea1, 16, "Salida:%c", configuracion_actual.tipo_entrada ? 'R' : 'E');
@@ -407,7 +414,7 @@ void task_keyboard(void *params) {
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
                 }
-            } else if (estado_menu == 5) {
+            } /*else if (estado_menu == 5) {
                 float ang;
                 lcd_msg_t msg;
 
@@ -424,7 +431,7 @@ void task_keyboard(void *params) {
                     estado_menu = 0; // salir del monitoreo
                 }
                 vTaskDelay(pdMS_TO_TICKS(200));
-            }
+            }*/
 
         }
         vTaskDelay(pdMS_TO_TICKS(50));
