@@ -31,6 +31,3 @@ char keypad_esperar_tecla(void) {
     return key;
 }
 
-char keypad_leer_tecla_no_bloq(void) {
-    return keypad_obtener_tecla((index_row_col){0, 3, 0, 3});
-}

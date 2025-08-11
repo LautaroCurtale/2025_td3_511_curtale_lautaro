@@ -3,6 +3,7 @@ add_library(teclado STATIC
     src/teclado.c
 )
 
+
 # Linkeo dependencias de la bibliotecas
 target_link_libraries(teclado
     pico_stdlib

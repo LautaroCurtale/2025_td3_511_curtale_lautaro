@@ -24,6 +24,9 @@ typedef struct {
     uint8_t col_end;
 } index_row_col;
 
+static uint8_t filas[4] = {FILA_1, FILA_2, FILA_3, FILA_4};
+static uint8_t columnas[4] = {COL_1, COL_2, COL_3, COL_4};
+
 static const char KEYPAD_MAP[KEYPAD_ROWS][KEYPAD_COLS] = {
     {'1', '2', '3', 'A'},
     {'4', '5', '6', 'B'},
@@ -33,5 +36,4 @@ static const char KEYPAD_MAP[KEYPAD_ROWS][KEYPAD_COLS] = {
 
 char keypad_esperar_tecla(void);
 char keypad_obtener_tecla(index_row_col index);
-char keypad_leer_tecla_no_bloq(void);
 #endif /* DEFINICIONES_H_ */

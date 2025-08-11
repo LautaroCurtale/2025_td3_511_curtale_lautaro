@@ -60,7 +60,7 @@ typedef struct {
 // Globales
 QueueHandle_t q_tecla, q_lcd, q_angulo, q_pid, q_flag_led;
 SemaphoreHandle_t semaforo_teclado;
-configuracion_t configuracion_actual = {90.0f, 10.0f, 0};
+configuracion_t configuracion_actual = {90.0f, 10.0f, 1};
 
 // Prototipo Funciones
 void set_motor_pwm(uint8_t gpio);
@@ -94,7 +94,6 @@ void task_i2c_guard(void *params) {
     while (1) {
         if (xQueueReceive(q_i2c_guard, &req, portMAX_DELAY)) {
             switch (req.dispositivo) {
-
                 case I2C_LCD: {
                     lcd_msg_t *msg = (lcd_msg_t*)req.data_in;
                     lcd_clear();
@@ -102,12 +101,32 @@ void task_i2c_guard(void *params) {
                     lcd_set_cursor(1, 0); lcd_string(msg->linea2);
                     break;
                 }
-
                 case I2C_ENCODER: {
                     float *ang = (float*)req.data_out;
                     *ang = (float)get_angle_position();  // Usa funciones internas del as5600.c
                     break;
                 }
+                case I2C_RTC: {
+                    time_t *t = (time_t*)req.data_out;
+                    *t = rtc_get_time();
+                    break;
+                }
+
+                case I2C_EEPROM_SAVE_CONF:
+                    guardar_configuracion((configuracion_t*)req.data_in);
+                    break;
+
+                case I2C_EEPROM_SAVE_RESULT:
+                    guardar_resultado((resultado_t*)req.data_in);
+                    break;
+
+                case I2C_EEPROM_LOAD_CONF:
+                    leer_configuracion((configuracion_t*)req.data_out);
+                    break;
+
+                case I2C_EEPROM_LOAD_RESULT:
+                    leer_ultimo_resultado((resultado_t*)req.data_out);
+                    break;
             }
 
             if (req.done)
@@ -116,26 +135,6 @@ void task_i2c_guard(void *params) {
     }
 }
 
-// Task: LCD
-/*
-void task_lcd(void *params) {
-    bool primer = false;
-    lcd_msg_t msg;
-    while (1) {
-        if (xQueueReceive(q_lcd, &msg, 0) == pdFALSE && primer == false){
-            primer = true;
-            lcd_clear();
-            snprintf(msg.linea1, 16, "Bienvenido");
-            lcd_set_cursor(0, 0); lcd_string(msg.linea1);
-        }
-        if (xQueueReceive(q_lcd, &msg, portMAX_DELAY)) {
-            lcd_clear();
-            lcd_set_cursor(0, 0); lcd_string(msg.linea1);
-            lcd_set_cursor(1, 0); lcd_string(msg.linea2);
-        }
-    }
-}
-*/
 // Task: LCD
 void task_lcd(void *params) {
     lcd_msg_t msg;
@@ -151,16 +150,6 @@ void task_lcd(void *params) {
     }
 }
 
-// Task: Encoder
-/*
-void task_encoder(void *params) {
-    while (1) {
-        float ang = (float)get_angle_position();
-        xQueueOverwrite(q_angulo, &ang);
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-}
-*/
 
 void task_encoder(void *params) {
     while (1) {
@@ -256,7 +245,6 @@ void task_control_pid(void *params) {
     }
 }
 
-/*
 // Task: Flags (LEDs)
 void task_flags(void *params) {
     while (1) {
@@ -279,14 +267,33 @@ void task_datalogger(void *params) {
         bool flag;
         xQueuePeek(q_flag_led, &flag, 0);
 
-        if (flag && !ultima_flag) {
+        if (flag && !ultima_flag && configuracion_actual.setpoint > 0) {
             resultado_t res;
             xQueuePeek(q_angulo, &res.angulo, 0);
             xQueuePeek(q_pid, &res.salida_control, 0);
             res.setpoint = configuracion_actual.setpoint;
             res.flag_led = true;
-            res.fecha = rtc_get_time();
-            guardar_resultado(&res);
+
+            SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+            i2c_guard_t req_time = {
+                .dispositivo = I2C_RTC,
+                .data_out = &res.fecha,
+                .done = sem
+            };
+            xQueueSend(q_i2c_guard, &req_time, portMAX_DELAY);
+            xSemaphoreTake(sem, portMAX_DELAY);
+            vSemaphoreDelete(sem);
+
+            SemaphoreHandle_t sem2 = xSemaphoreCreateBinary();
+            i2c_guard_t req_save = {
+                .dispositivo = I2C_EEPROM_SAVE_RESULT,
+                .data_in = &res,
+                .done = sem2
+            };
+            xQueueSend(q_i2c_guard, &req_save, portMAX_DELAY);
+            xSemaphoreTake(sem2, portMAX_DELAY);
+            vSemaphoreDelete(sem2);
+
             guardado = true;
         }
 
@@ -294,7 +301,7 @@ void task_datalogger(void *params) {
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
-*/
+
 // Task: Teclado
 void task_keyboard(void *params) {
     static char estado_menu = 0;
@@ -302,6 +309,8 @@ void task_keyboard(void *params) {
     static float valorpend = 0.0f;
     static int digitsp = 0;
     static int digitpend = 0;
+    bool enable = 0;
+    resultado_t res;
 
     while (1) {
             char tecla = keypad_esperar_tecla();
@@ -316,25 +325,87 @@ void task_keyboard(void *params) {
                         estado_menu = 1;
                         break;
                     case 'B':
-                        float ang;
-                        lcd_msg_t msg;
-                        // leer ángulo y mostrar
-                        xQueuePeek(q_angulo, &ang, 0);
-                        float err = configuracion_actual.setpoint - ang;
-                        snprintf(msg.linea1, 16, "SP:%.0f VA:%.0f", configuracion_actual.setpoint, ang);
-                        snprintf(msg.linea2, 16, "Err:%.0f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
-                        xQueueSend(q_lcd, &msg, 0);
+                        // Entrar en modo monitor hasta que se presione '*'
+                        while (1) {
+                            float ang;
+                            xQueuePeek(q_angulo, &ang, 0);
+                            float err = configuracion_actual.setpoint - ang;
+                            snprintf(msg.linea1, 16, "SP:%.0f VA:%.0f", configuracion_actual.setpoint, ang);
+                            snprintf(msg.linea2, 16, "Err:%.0f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
+                            xQueueSend(q_lcd, &msg, 0);
+                            // Esperar 200 ms (igual que el muestreo del ángulo)
+                            vTaskDelay(pdMS_TO_TICKS(200));
+                            // Revisar si se presionó alguna tecla para salir
+                            char salida = keypad_obtener_tecla((index_row_col){0, 3, 0, 3});
+                            if (salida != '\0') {
+                                // Esperar a que se suelte la tecla antes de salir
+                                while (keypad_obtener_tecla((index_row_col){0, 3, 0, 3}) != '\0') {
+                                    vTaskDelay(pdMS_TO_TICKS(50));
+                                }
+                                break; // salir del modo monitor
+                            }
+                        }
                         break;
                     case 'C':
                         snprintf(msg.linea1, 16, "Salida:%c", configuracion_actual.tipo_entrada ? 'R' : 'E');
                         snprintf(msg.linea2, 16, "SP:%.0f P:%.0f", configuracion_actual.setpoint, configuracion_actual.pendiente);
                         xQueueSend(q_lcd, &msg, 0);
                         break;
-                    case '*': 
-                        bool enable = true;
+                    case 'D':
+                        SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+                        i2c_guard_t req = {
+                            .dispositivo = I2C_EEPROM_LOAD_RESULT,
+                            .data_out = &res,
+                            .done = sem
+                        };
+                        xQueueSend(q_i2c_guard, &req, portMAX_DELAY);
+                        xSemaphoreTake(sem, portMAX_DELAY);
+                        vSemaphoreDelete(sem);
+                        lcd_msg_t msg;
+                        snprintf(msg.linea1, 16, "SP:%.0f OUT:%.0f", res.setpoint, res.salida_control);
+                        snprintf(msg.linea2, 16, "Ang:%.0f F:%02d:%02d", res.angulo, res.fecha.hour, res.fecha.minute);
+                        xQueueSend(q_lcd, &msg, 0);
+                        break;
+                    case '#': 
+                        enable = true;
                         xQueueOverwrite(q_pid_enable, &enable);
                         snprintf(msg.linea1, 16, "PID Activado");
                         msg.linea2[0] = 0;
+                        xQueueSend(q_lcd, &msg, 0);
+                        break;
+                    case '*': 
+                        enable = false;
+                        xQueueOverwrite(q_pid_enable, &enable);
+                        xQueuePeek(q_angulo, &res.angulo, 0);
+                        res.setpoint = configuracion_actual.setpoint;
+                        xQueuePeek(q_pid, &res.salida_control, 0);
+                        res.tipo_entrada = configuracion_actual.tipo_entrada;
+                        if(fabsf(configuracion_actual.setpoint - res.angulo) <= 3.0f)
+                        res.flag_led = 1;
+                        else res.flag_led = 0;
+                        // Obtener hora desde RTC
+                        SemaphoreHandle_t sem_time = xSemaphoreCreateBinary();
+                        i2c_guard_t req_time_res = {
+                            .dispositivo = I2C_RTC,
+                            .data_out = &res.fecha,
+                            .done = sem_time
+                        };
+                        xQueueSend(q_i2c_guard, &req_time_res, portMAX_DELAY);
+                        xSemaphoreTake(sem_time, portMAX_DELAY);
+                        vSemaphoreDelete(sem_time);
+                        // Guardar en EEPROM
+                        SemaphoreHandle_t sem_save_res = xSemaphoreCreateBinary();
+                        i2c_guard_t req_save_res = {
+                            .dispositivo = I2C_EEPROM_SAVE_RESULT,
+                            .data_in = &res,
+                            .done = sem_save_res
+                        };
+                        xQueueSend(q_i2c_guard, &req_save_res, portMAX_DELAY);
+                        xSemaphoreTake(sem_save_res, portMAX_DELAY);
+                        vSemaphoreDelete(sem_save_res);
+                        // Mensaje LCD
+                        snprintf(msg.linea1, 16, "PID Desactivado");
+                        snprintf(msg.linea2, 16, "Guarda Result.");
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                 }
@@ -358,11 +429,27 @@ void task_keyboard(void *params) {
                 } else if (tecla == '#') {
                     configuracion_actual.setpoint = fminf(valorset, 360.0f);
                     configuracion_actual.pendiente = 0;
-                    //configuracion_actual.fecha = rtc_get_time();
-                    //guardar_configuracion(&configuracion_actual);
                     snprintf(msg.linea1, 16, "Guardado");
                     msg.linea2[0] = 0;
                     xQueueSend(q_lcd, &msg, 0);
+                    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+                    i2c_guard_t req_time = {
+                        .dispositivo = I2C_RTC,
+                        .data_out = &configuracion_actual.fecha,
+                        .done = sem
+                    };
+                    xQueueSend(q_i2c_guard, &req_time, portMAX_DELAY);
+                    xSemaphoreTake(sem, portMAX_DELAY);
+                    vSemaphoreDelete(sem);
+                    SemaphoreHandle_t sem2 = xSemaphoreCreateBinary();
+                    i2c_guard_t req_save = {
+                        .dispositivo = I2C_EEPROM_SAVE_CONF,
+                        .data_in = &configuracion_actual,
+                        .done = sem2
+                    };
+                    xQueueSend(q_i2c_guard, &req_save, portMAX_DELAY);
+                    xSemaphoreTake(sem2, portMAX_DELAY);
+                    vSemaphoreDelete(sem2);
                     estado_menu = 0;
                 } else if (tecla == '*') {
                     snprintf(msg.linea1, 16, "Cancelado");
@@ -398,44 +485,41 @@ void task_keyboard(void *params) {
                     snprintf(msg.linea2, 16, "%.0f", valorpend);
                     xQueueSend(q_lcd, &msg, 0);
                     } else if (tecla == '#') {
-                    configuracion_actual.setpoint = fminf(valorset, 360.0f);
-                    configuracion_actual.pendiente = fminf(valorpend, 30.0f);
-                    //configuracion_actual.fecha = rtc_get_time();
-                    //guardar_configuracion(&configuracion_actual);
-                    snprintf(msg.linea1, 16, "Guardado");
-                    msg.linea2[0] = 0;
-                    xQueueSend(q_lcd, &msg, 0);
-                    estado_menu = 0;
+                        configuracion_actual.setpoint = fminf(valorset, 360.0f);
+                        configuracion_actual.pendiente = fminf(valorpend, 30.0f);
+                        snprintf(msg.linea1, 16, "Guardado");
+                        msg.linea2[0] = 0;
+                        xQueueSend(q_lcd, &msg, 0);
+                        SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+                        i2c_guard_t req_time = {
+                            .dispositivo = I2C_RTC,
+                            .data_out = &configuracion_actual.fecha,
+                            .done = sem
+                        };
+                        xQueueSend(q_i2c_guard, &req_time, portMAX_DELAY);
+                        xSemaphoreTake(sem, portMAX_DELAY);
+                        vSemaphoreDelete(sem);
+                        SemaphoreHandle_t sem2 = xSemaphoreCreateBinary();
+                        i2c_guard_t req_save = {
+                            .dispositivo = I2C_EEPROM_SAVE_CONF,
+                            .data_in = &configuracion_actual,
+                            .done = sem2
+                        };
+                        xQueueSend(q_i2c_guard, &req_save, portMAX_DELAY);
+                        xSemaphoreTake(sem2, portMAX_DELAY);
+                        vSemaphoreDelete(sem2);
+                        estado_menu = 0;
                     } else if (tecla == '*') {
-                    if (configuracion_actual.pendiente == 0)
-                    configuracion_actual.tipo_entrada = 'E';
-                    snprintf(msg.linea1, 16, "Cancelado");
-                    msg.linea2[0] = 0;
-                    xQueueSend(q_lcd, &msg, 0);
-                    estado_menu = 0;
+                        if (configuracion_actual.pendiente == 0)
+                        configuracion_actual.tipo_entrada = 1;
+                        snprintf(msg.linea1, 16, "Cancelado");
+                        msg.linea2[0] = 0;
+                        xQueueSend(q_lcd, &msg, 0);
+                        estado_menu = 0;
                 }
-            } /*else if (estado_menu == 5) {
-                float ang;
-                lcd_msg_t msg;
-
-                // leer ángulo y mostrar
-                xQueuePeek(q_angulo, &ang, 0);
-                float err = configuracion_actual.setpoint - ang;
-                snprintf(msg.linea1, 16, "SP:%.0f VA:%.0f", configuracion_actual.setpoint, ang);
-                snprintf(msg.linea2, 16, "Err:%.0f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
-                xQueueSend(q_lcd, &msg, 0);
-
-                // lectura no bloqueante del teclado
-                char tecla = keypad_leer_tecla_no_bloq();
-                if (tecla != '\0') {
-                    estado_menu = 0; // salir del monitoreo
-                }
-                vTaskDelay(pdMS_TO_TICKS(200));
-            }*/
-
+            }
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
+}
 
 // Task Init
 void task_init(void *params) {
@@ -466,23 +550,31 @@ void task_init(void *params) {
     q_angulo = xQueueCreate(1, sizeof(float));
     q_pid = xQueueCreate(1, sizeof(float));
     q_flag_led = xQueueCreate(1, sizeof(bool));
-    q_i2c_guard = xQueueCreate(4, sizeof(i2c_guard_t));
+    q_i2c_guard = xQueueCreate(8, sizeof(i2c_guard_t));
     q_pid_enable = xQueueCreate(1, sizeof(bool));
-    semaforo_teclado = xSemaphoreCreateBinary();
 
     vTaskDelete(NULL);
 }
 
 int main() {
     stdio_init_all();
-    xTaskCreate(task_init, "Init", 1024, NULL, 4, NULL);
+/*    xTaskCreate(task_init, "Init", 1024, NULL, 4, NULL);
     xTaskCreate(task_lcd, "LCD", 2048, NULL, 2, NULL);
     xTaskCreate(task_keyboard, "Keyboard", 2048, NULL, 1, NULL);
     xTaskCreate(task_i2c_guard, "I2C_Guard", 2048, NULL, 3, NULL);
     xTaskCreate(task_encoder, "Encoder", 1024, NULL, 2, NULL);
     xTaskCreate(task_control_pid, "PID", 2048, NULL, 2, NULL);
-    //xTaskCreate(task_flags, "Flags", 1024, NULL, 1, NULL);
-    //xTaskCreate(task_datalogger, "Datalogger", 2048, NULL, 1, NULL);
+    xTaskCreate(task_flags, "Flags", 1024, NULL, 1, NULL);
+    xTaskCreate(task_datalogger, "Datalogger", 2048, NULL, 1, NULL);*/
+
+    xTaskCreate(task_init,        "Init",        configMINIMAL_STACK_SIZE * 2, NULL, 5, NULL);
+    xTaskCreate(task_lcd,         "LCD",         configMINIMAL_STACK_SIZE * 4, NULL, 2, NULL);
+    xTaskCreate(task_keyboard,    "Keyboard",    configMINIMAL_STACK_SIZE * 3, NULL, 2, NULL);
+    xTaskCreate(task_i2c_guard,   "I2C_Guard",   configMINIMAL_STACK_SIZE * 4, NULL, 3, NULL);
+    xTaskCreate(task_encoder,     "Encoder",     configMINIMAL_STACK_SIZE * 2, NULL, 3, NULL);
+    xTaskCreate(task_control_pid, "PID",         configMINIMAL_STACK_SIZE * 4, NULL, 4, NULL);
+    xTaskCreate(task_flags,       "Flags",       configMINIMAL_STACK_SIZE * 2, NULL, 1, NULL);
+    xTaskCreate(task_datalogger,  "Datalogger",  configMINIMAL_STACK_SIZE * 4, NULL, 1, NULL);
     vTaskStartScheduler();
     while (1);
 }

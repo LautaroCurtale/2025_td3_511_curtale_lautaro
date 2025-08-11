@@ -49,6 +49,7 @@ typedef struct {
     float angulo;
     float setpoint;
     float salida_control;
+    bool tipo_entrada; // 0 = escalón, 1 = rampa
     bool flag_led;
     time_t fecha;
 } resultado_t;
