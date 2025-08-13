@@ -77,8 +77,8 @@ void task_read(void *params) {
     }
 }
 
-// Tarea que imprime en el LCD la temperatura y la presión
-void task_print1(void *params) {
+// Tarea que imprime en el LCD y limpia el semaforo
+void task_print(void *params) {
     char linea1[16];
     char linea2[16];
     // Estructura para la cola
@@ -110,12 +110,9 @@ int main(void) {
     stdio_init_all();
 
     // Creacion de tareas
-    xTaskCreate(task_init, "Inicializacion", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
-    xTaskCreate(task_read, "Lectura", 2 * configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-    xTaskCreate(task_print1, "Display1", 2 * configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-    xTaskCreate(task_print2, "Display2", 2 * configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-    xTaskCreate(task_pulsador, "Pulsador", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-    xTaskCreate(task_led, "LED", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+    xTaskCreate(task_init, "Inicializacion", 2 * configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+    xTaskCreate(task_read, "Lectura", 2 * configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(task_print, "Display", 2 * configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
     // Arranca el sistema operativo
     vTaskStartScheduler();
