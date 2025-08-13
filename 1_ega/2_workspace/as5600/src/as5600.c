@@ -18,7 +18,7 @@ uint16_t get_angle_position() {
     uint8_t high = as5600_read_reg(AS5600_RAW_ANGLE_MSB) & 0x0F;
     uint8_t low = as5600_read_reg(AS5600_RAW_ANGLE_LSB);
     uint16_t raw_angle = (high << 8) | low;
-    return (uint16_t)(raw_angle * 360.0f / 4096.0f);
+    return (float) (raw_angle * 360.0f / 4096.0f);
 }
 
 void init_as5600_dir() {

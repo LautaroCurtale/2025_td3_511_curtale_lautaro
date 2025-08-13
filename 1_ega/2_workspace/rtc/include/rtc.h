@@ -1,34 +1,25 @@
 #ifndef _RTC_H_
 #define _RTC_H_
 
-#include <stdio.h>
-#include <string.h>
-#include "pico/stdlib.h"
 #include "hardware/i2c.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include "pico/stdlib.h"
 
-// Comandos
-#define RTC_SECONDS 0x00
-#define RTC_MINUTES 0x01
-#define RTC_HOURS 0x02
-#define RTC_DAY 0x03
-#define RTC_DATE 0x04
-#define RTC_MONTH 0x05
-#define RTC_YEAR 0x06
-#define RTC_CONTROL 0x07
+#define RTC_ADDR 0x68
+#define EEPROM_ADDR 0x57
+#define I2C_PORT      i2c0      // I2C usado
 
-// Conversion de años
-#define YEAR_BASE 2000
+// EEPROM: direcciones base y parámetros
+#define EEPROM_ADDR_CONFIGS     0x0200  // inicio del área para configuraciones
+#define EEPROM_PTR_CONFIG       0x00FD  // puntero a última configuración guardada
+#define EEPROM_MAX_CONFIGS      5       // cantidad máxima de configuraciones guardadas
 
-// Address
-#define RTC_ADD 0x68
-#define EEPROM_ADDR 0x57  // Ajusta seg�n tu m�dulo
-#define EEPROM_SIZE 4096  // Bytes totales (32Kbit = 4KB)
-#define EEPROM_ADDR_CONFIG   0x0000
-#define EEPROM_ADDR_RESULT   0x0100
-#define EEPROM_MAX_RESULTS   128  // suponiendo 4KB / sizeof(resultado_t)
-#define EEPROM_PTR_ADDR      0x00F0  // Direcci�n especial para �ndice circular
+#define EEPROM_ADDR_RESULT      0x0300  // inicio del área para resultados
+#define EEPROM_PTR_ADDR         0x00FE  // puntero a último resultado guardado
+#define EEPROM_MAX_RESULTS      10      // cantidad máxima de resultados guardados
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint16_t year;
     uint8_t month;
     uint8_t date;
@@ -38,7 +29,7 @@ typedef struct {
     uint8_t second;
 } time_t;
 
-typedef struct {
+typedef struct __attribute__((packed)) {
     float setpoint;
     float pendiente;
     bool tipo_entrada; // 0 = escalón, 1 = rampa
@@ -48,6 +39,7 @@ typedef struct {
 typedef struct {
     float angulo;
     float setpoint;
+    float error;
     float salida_control;
     bool tipo_entrada; // 0 = escalón, 1 = rampa
     bool flag_led;
@@ -55,10 +47,20 @@ typedef struct {
 } resultado_t;
 
 void rtc_init(i2c_inst_t *i2c);
-void rtc_set_time(time_t time);
-time_t rtc_get_time(void);
+void rtc_set_time(i2c_inst_t *i2c, const time_t *time);
+void rtc_get_time(i2c_inst_t *i2c, time_t *time);
+
+bool eeprom_write_bytes(i2c_inst_t *i2c, uint8_t address, uint8_t data);
+bool eeprom_read_bytes(i2c_inst_t *i2c, uint8_t address, uint8_t *data);
+
+// Funciones para escribir y leer en la EEPROM AT24C32
+void eeprom_write(uint16_t addr, const uint8_t *data, size_t len);
+void eeprom_read(uint16_t addr, uint8_t *data, size_t len);
+
+// Funciones EEPROM (para configuración y resultados)
 bool guardar_configuracion(const configuracion_t* conf);
-bool leer_configuracion(configuracion_t* conf);
+bool leer_ultima_configuracion(configuracion_t* conf);
+
 bool guardar_resultado(const resultado_t* res);
 bool leer_ultimo_resultado(resultado_t* res);
 

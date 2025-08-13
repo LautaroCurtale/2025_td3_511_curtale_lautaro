@@ -24,7 +24,7 @@
 #define DIR 6
 #define IN1 0
 #define IN2 1
-#define ENA 3
+#define ENA 2
 #define LED_VERDE 21
 #define LED_ROJO 22
 
@@ -33,24 +33,18 @@
 #define RTC_ADD 0x68
 
 // Teclado
-#define FILA_1 8
-#define FILA_2 9
-#define FILA_3 10
-#define FILA_4 11
-#define COL_1  12
-#define COL_2  13
-#define COL_3  14
-#define COL_4  15
+const uint FILA_PINS[] = {8, 9, 10, 11};
+const uint COL_PINS[]  = {12, 13, 14, 15};
 
-// Tabla de teclas
-static const char teclado[4][4] = {
-    {'1','2','3','A'},
-    {'4','5','6','B'},
-    {'7','8','9','C'},
-    {'*','0','#','D'}
+const char teclas[4][4] = {
+    {'1', '2', '3', 'A'},
+    {'4', '5', '6', 'B'},
+    {'7', '8', '9', 'C'},
+    {'*', '0', '#', 'D'}
 };
 
 #define PWM_FRECUENCIA 10000
+#define MUESTROMS 10
 
 typedef struct {
     char linea1[16];
@@ -60,7 +54,7 @@ typedef struct {
 // Globales
 QueueHandle_t q_tecla, q_lcd, q_angulo, q_pid, q_flag_led;
 SemaphoreHandle_t semaforo_teclado;
-configuracion_t configuracion_actual = {90.0f, 10.0f, 1};
+configuracion_t configuracion_actual = {90.0f, 0.0f, 0};
 
 // Prototipo Funciones
 void set_motor_pwm(uint8_t gpio);
@@ -94,23 +88,19 @@ void task_i2c_guard(void *params) {
     while (1) {
         if (xQueueReceive(q_i2c_guard, &req, portMAX_DELAY)) {
             switch (req.dispositivo) {
-                case I2C_LCD: {
+                case I2C_LCD:
                     lcd_msg_t *msg = (lcd_msg_t*)req.data_in;
-                    lcd_clear();
                     lcd_set_cursor(0, 0); lcd_string(msg->linea1);
                     lcd_set_cursor(1, 0); lcd_string(msg->linea2);
                     break;
-                }
-                case I2C_ENCODER: {
+                case I2C_ENCODER:
                     float *ang = (float*)req.data_out;
                     *ang = (float)get_angle_position();  // Usa funciones internas del as5600.c
                     break;
-                }
-                case I2C_RTC: {
+                case I2C_RTC:
                     time_t *t = (time_t*)req.data_out;
-                    *t = rtc_get_time();
+                    rtc_get_time(I2C_PORT, t);
                     break;
-                }
 
                 case I2C_EEPROM_SAVE_CONF:
                     guardar_configuracion((configuracion_t*)req.data_in);
@@ -121,14 +111,14 @@ void task_i2c_guard(void *params) {
                     break;
 
                 case I2C_EEPROM_LOAD_CONF:
-                    leer_configuracion((configuracion_t*)req.data_out);
+                    leer_ultima_configuracion((configuracion_t*)req.data_out);
                     break;
 
                 case I2C_EEPROM_LOAD_RESULT:
                     leer_ultimo_resultado((resultado_t*)req.data_out);
                     break;
+            
             }
-
             if (req.done)
                 xSemaphoreGive(req.done);
         }
@@ -165,38 +155,43 @@ void task_encoder(void *params) {
         vSemaphoreDelete(sem);
 
         xQueueOverwrite(q_angulo, &ang);
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(30));
     }
 }
 
 
 // Task: PID
 void task_control_pid(void *params) {
-    float kp_pi = 1.0f, ki = 0.1f;
-    float kp_pd = 1.0f, kd = 0.1f;
+    // Parámetros PID
+    float kp = 0.9f;  // Ganancia proporcional
+    float ki = 0.01f;  // Ganancia integral
+    float kd = 0.001f;  // Ganancia derivativa
+    float Ts = 0.01f; // Periodo de muestreo en segundos
     float error_prev = 0.0f;
     float integral = 0.0f;
     int estable_count = 0;
     bool pid_enable = false;
+    float ref = 0.0f;
+    float ang = 0, salida = 0, salida_prev = 0;
 
-    set_motor_pwm(ENA);
+    //set_motor_pwm(ENA);
 
     while (1) {
         // Chequea si hay señal para habilitar el PID
         bool cmd;
-        if (xQueueReceive(q_pid_enable, &cmd, 0)) {
+        if (xQueuePeek(q_pid_enable, &cmd, 0)) {
             pid_enable = cmd;
         }
 
         if (!pid_enable) {
-            vTaskDelay(pdMS_TO_TICKS(200));
+            pwm_set_gpio_level(ENA, 0);
+            vTaskDelay(pdMS_TO_TICKS(MUESTROMS));
             continue;
         }
 
-        float ang = 0, salida = 0;
+        //float ang = 0, salida = 0;
         xQueuePeek(q_angulo, &ang, 0);
 
-        static float ref = 0;
         if (configuracion_actual.tipo_entrada == 0) {
             ref = configuracion_actual.setpoint;
         } else {
@@ -205,43 +200,42 @@ void task_control_pid(void *params) {
         }
 
         float error = ref - ang;
-        float delta = error - error_prev;
 
-        if (fabs(error) < 2.0f)
-            estable_count++;
-        else
-            estable_count = 0;
+        // "wrap" de error a rango [-180, +180] grados
+        if (error > 180.0f)
+            error -= 360.0f;
+        else if (error < -180.0f)
+            error += 360.0f;
 
-        if (estable_count >= 10)
-            salida = kp_pd * error + kd * (delta / 0.02f);
-        else {
-            integral += error * 0.02f;
-            salida = kp_pi * error + ki * integral;
-        }
+        // Componente integral (con anti-windup opcional)
+        integral += error * Ts;
+        
+        if(integral >= 100)
+        integral = 100;
+        if(integral <= -100)
+        integral = -100;
 
-        salida = fmaxf(fminf(salida, 100.0f), -100.0f);
+        // Componente derivativa
+        float derivada = (error - error_prev) / Ts;
 
-        if (salida > 0) {
-            gpio_put(IN1, 0);
-            gpio_put(IN2, 0);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            motor_sentido_horario();        // CW
-            pwm_set_gpio_level(ENA, salida);
-        } else if (salida < 0) {
-            gpio_put(IN1, 0);
-            gpio_put(IN2, 0);
-            vTaskDelay(pdMS_TO_TICKS(100));
-            motor_sentido_antihorario();    // CCW
-            pwm_set_gpio_level(ENA, -salida);
-        } else {
-            gpio_put(IN1, 0);
-            gpio_put(IN2, 0);
-            pwm_set_gpio_level(ENA, 0);
-        }
-        xQueueOverwrite(q_pid, &salida);
+        // Salida PID
+        salida = (kp * error) + (ki * integral) + (kd * derivada);
+
+        // Actualizar error previo
         error_prev = error;
 
-        vTaskDelay(pdMS_TO_TICKS(200));
+        salida = fmaxf(fminf(salida, 700), -700);
+
+        if (salida > 0) {
+            motor_sentido_horario();        // CW
+            pwm_set_gpio_level(ENA, (uint16_t) salida);
+        } else if (salida < 0) {
+            motor_sentido_antihorario();    // CCW
+            pwm_set_gpio_level(ENA, (uint16_t) -salida);
+        } 
+        xQueueOverwrite(q_pid, &salida);
+        printf("Val=%0.f Sal=%0.f?\n", ang,salida);
+        vTaskDelay(pdMS_TO_TICKS(MUESTROMS));
     }
 }
 
@@ -265,7 +259,7 @@ void task_datalogger(void *params) {
 
     while (1) {
         bool flag;
-        xQueuePeek(q_flag_led, &flag, 0);
+        if (xQueuePeek(q_flag_led, &flag, 0));
 
         if (flag && !ultima_flag && configuracion_actual.setpoint > 0) {
             resultado_t res;
@@ -310,45 +304,45 @@ void task_keyboard(void *params) {
     static int digitsp = 0;
     static int digitpend = 0;
     bool enable = 0;
+    float ang;
+    float err;
+    bool flag_led;
     resultado_t res;
 
     while (1) {
-            char tecla = keypad_esperar_tecla();
+            char tecla = escanear_teclado();
             lcd_msg_t msg;
-
             if (estado_menu == 0) {
                 switch (tecla) {
                     case 'A':
                         snprintf(msg.linea1, 16, "Tipo de Salida:");
-                        snprintf(msg.linea2, 16, "A:Esc B:Ram");
+                        snprintf(msg.linea2, 16, "A:Esc B:Ram    ");
                         xQueueSend(q_lcd, &msg, 0);
                         estado_menu = 1;
                         break;
                     case 'B':
                         // Entrar en modo monitor hasta que se presione '*'
                         while (1) {
-                            float ang;
+                            ang;
                             xQueuePeek(q_angulo, &ang, 0);
-                            float err = configuracion_actual.setpoint - ang;
-                            snprintf(msg.linea1, 16, "SP:%.0f VA:%.0f", configuracion_actual.setpoint, ang);
-                            snprintf(msg.linea2, 16, "Err:%.0f TS:%c", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
+                            err = fabs(configuracion_actual.setpoint - ang);
+                            snprintf(msg.linea1, 16, "SP:%3.0f VA:%3.0f  ", configuracion_actual.setpoint, ang);
+                            snprintf(msg.linea2, 16, "Err:%3.0f TS:%c   ", err, configuracion_actual.tipo_entrada ? 'R' : 'E');
                             xQueueSend(q_lcd, &msg, 0);
-                            // Esperar 200 ms (igual que el muestreo del ángulo)
-                            vTaskDelay(pdMS_TO_TICKS(200));
-                            // Revisar si se presionó alguna tecla para salir
-                            char salida = keypad_obtener_tecla((index_row_col){0, 3, 0, 3});
+                            char salida = escanear_teclado();
                             if (salida != '\0') {
                                 // Esperar a que se suelte la tecla antes de salir
-                                while (keypad_obtener_tecla((index_row_col){0, 3, 0, 3}) != '\0') {
-                                    vTaskDelay(pdMS_TO_TICKS(50));
-                                }
-                                break; // salir del modo monitor
+                                //while (escanear_teclado() != '\0') {
+                                    //vTaskDelay(pdMS_TO_TICKS(50));
+                                //}
+                            break; // salir del modo monitor
                             }
+                            
                         }
                         break;
                     case 'C':
-                        snprintf(msg.linea1, 16, "Salida:%c", configuracion_actual.tipo_entrada ? 'R' : 'E');
-                        snprintf(msg.linea2, 16, "SP:%.0f P:%.0f", configuracion_actual.setpoint, configuracion_actual.pendiente);
+                        snprintf(msg.linea1, 16, "Salida:%c       ", configuracion_actual.tipo_entrada ? 'R' : 'E');
+                        snprintf(msg.linea2, 16, "SP:%3.0f P:%3.0f   ", configuracion_actual.setpoint, configuracion_actual.pendiente);
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                     case 'D':
@@ -361,16 +355,15 @@ void task_keyboard(void *params) {
                         xQueueSend(q_i2c_guard, &req, portMAX_DELAY);
                         xSemaphoreTake(sem, portMAX_DELAY);
                         vSemaphoreDelete(sem);
-                        lcd_msg_t msg;
-                        snprintf(msg.linea1, 16, "SP:%.0f OUT:%.0f", res.setpoint, res.salida_control);
-                        snprintf(msg.linea2, 16, "Ang:%.0f F:%02d:%02d", res.angulo, res.fecha.hour, res.fecha.minute);
+                        snprintf(msg.linea1, 16, "SP:%3.0f OUT:%3.0f ", res.setpoint, res.salida_control);
+                        snprintf(msg.linea2, 16, "Ang:%3.0f F:%02d:%02d", res.angulo, res.fecha.hour, res.fecha.minute);
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                     case '#': 
                         enable = true;
                         xQueueOverwrite(q_pid_enable, &enable);
-                        snprintf(msg.linea1, 16, "PID Activado");
-                        msg.linea2[0] = 0;
+                        snprintf(msg.linea1, 16, "PID Activado   ");
+                        snprintf(msg.linea2, 16, "               ");
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                     case '*': 
@@ -405,15 +398,16 @@ void task_keyboard(void *params) {
                         vSemaphoreDelete(sem_save_res);
                         // Mensaje LCD
                         snprintf(msg.linea1, 16, "PID Desactivado");
-                        snprintf(msg.linea2, 16, "Guarda Result.");
+                        snprintf(msg.linea2, 16, "Guarda Result. ");
+                        xQueueSend(q_flag_led, &flag_led, 0);
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                 }
             } else if (estado_menu == 1) {
                 if (tecla == 'A' || tecla == 'B') {
                     configuracion_actual.tipo_entrada = tecla == 'B';
-                    snprintf(msg.linea1, 16, "Setpoint:");
-                    msg.linea2[0] = 0;
+                    snprintf(msg.linea1, 16, "Setpoint:      ");
+                    snprintf(msg.linea2, 16, "               ");
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = (tecla == 'A') ? 2 : 3;
                     valorset = 0;
@@ -424,36 +418,18 @@ void task_keyboard(void *params) {
                 if (tecla >= '0' && tecla <= '9' && digitsp < 3) {
                     valorset = valorset * 10 + (tecla - '0');
                     digitsp++;
-                    snprintf(msg.linea2, 16, "%.0f", valorset);
+                    snprintf(msg.linea2, 16, "%3.0f            ", valorset);
                     xQueueSend(q_lcd, &msg, 0);
                 } else if (tecla == '#') {
                     configuracion_actual.setpoint = fminf(valorset, 360.0f);
                     configuracion_actual.pendiente = 0;
-                    snprintf(msg.linea1, 16, "Guardado");
-                    msg.linea2[0] = 0;
+                    snprintf(msg.linea1, 16, "Guardado       ");
+                    snprintf(msg.linea2, 16, "               ");
                     xQueueSend(q_lcd, &msg, 0);
-                    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
-                    i2c_guard_t req_time = {
-                        .dispositivo = I2C_RTC,
-                        .data_out = &configuracion_actual.fecha,
-                        .done = sem
-                    };
-                    xQueueSend(q_i2c_guard, &req_time, portMAX_DELAY);
-                    xSemaphoreTake(sem, portMAX_DELAY);
-                    vSemaphoreDelete(sem);
-                    SemaphoreHandle_t sem2 = xSemaphoreCreateBinary();
-                    i2c_guard_t req_save = {
-                        .dispositivo = I2C_EEPROM_SAVE_CONF,
-                        .data_in = &configuracion_actual,
-                        .done = sem2
-                    };
-                    xQueueSend(q_i2c_guard, &req_save, portMAX_DELAY);
-                    xSemaphoreTake(sem2, portMAX_DELAY);
-                    vSemaphoreDelete(sem2);
                     estado_menu = 0;
                 } else if (tecla == '*') {
-                    snprintf(msg.linea1, 16, "Cancelado");
-                    msg.linea2[0] = 0;
+                    snprintf(msg.linea1, 16, "Cancelado      ");
+                    snprintf(msg.linea2, 16, "               ");
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
                 }
@@ -461,20 +437,20 @@ void task_keyboard(void *params) {
                 if (tecla >= '0' && tecla <= '9' && digitsp < 3) {
                     valorset = valorset * 10 + (tecla - '0');
                     digitsp++;
-                    snprintf(msg.linea2, 16, "%.0f", valorset);
+                    snprintf(msg.linea2, 16, "%3.0f            ", valorset);
                     xQueueSend(q_lcd, &msg, 0);
                 } else if (tecla == '#') {
                     if (estado_menu == 3){
-                    snprintf(msg.linea1, 16, "Pendiente:");
-                    msg.linea2[0] = 0;
+                    snprintf(msg.linea1, 16, "Pendiente:     ");
+                    snprintf(msg.linea2, 16, "               ");
                     xQueueSend(q_lcd, &msg, 0);
                     valorpend = 0;
                     digitpend = 0;
                     estado_menu = 4;
                     }
                 } else if (tecla == '*') {
-                    snprintf(msg.linea1, 16, "Cancelado");
-                    msg.linea2[0] = 0;
+                    snprintf(msg.linea1, 16, "Cancelado      ");
+                    snprintf(msg.linea2, 16, "               ");
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
                 }
@@ -482,38 +458,20 @@ void task_keyboard(void *params) {
                     if (tecla >= '0' && tecla <= '9' && digitpend < 3) {
                     valorpend = valorpend * 10 + (tecla - '0');
                     digitpend++;
-                    snprintf(msg.linea2, 16, "%.0f", valorpend);
+                    snprintf(msg.linea2, 16, "%3.0f            ", valorpend);
                     xQueueSend(q_lcd, &msg, 0);
                     } else if (tecla == '#') {
                         configuracion_actual.setpoint = fminf(valorset, 360.0f);
                         configuracion_actual.pendiente = fminf(valorpend, 30.0f);
-                        snprintf(msg.linea1, 16, "Guardado");
-                        msg.linea2[0] = 0;
+                        snprintf(msg.linea1, 16, "Guardado       ");
+                        snprintf(msg.linea2, 16, "               ");
                         xQueueSend(q_lcd, &msg, 0);
-                        SemaphoreHandle_t sem = xSemaphoreCreateBinary();
-                        i2c_guard_t req_time = {
-                            .dispositivo = I2C_RTC,
-                            .data_out = &configuracion_actual.fecha,
-                            .done = sem
-                        };
-                        xQueueSend(q_i2c_guard, &req_time, portMAX_DELAY);
-                        xSemaphoreTake(sem, portMAX_DELAY);
-                        vSemaphoreDelete(sem);
-                        SemaphoreHandle_t sem2 = xSemaphoreCreateBinary();
-                        i2c_guard_t req_save = {
-                            .dispositivo = I2C_EEPROM_SAVE_CONF,
-                            .data_in = &configuracion_actual,
-                            .done = sem2
-                        };
-                        xQueueSend(q_i2c_guard, &req_save, portMAX_DELAY);
-                        xSemaphoreTake(sem2, portMAX_DELAY);
-                        vSemaphoreDelete(sem2);
                         estado_menu = 0;
                     } else if (tecla == '*') {
                         if (configuracion_actual.pendiente == 0)
                         configuracion_actual.tipo_entrada = 1;
-                        snprintf(msg.linea1, 16, "Cancelado");
-                        msg.linea2[0] = 0;
+                        snprintf(msg.linea1, 16, "Cancelado      ");
+                        snprintf(msg.linea2, 16, "               ");
                         xQueueSend(q_lcd, &msg, 0);
                         estado_menu = 0;
                 }
@@ -528,19 +486,20 @@ void task_init(void *params) {
     gpio_set_function(SCL, GPIO_FUNC_I2C);
     gpio_pull_up(SDA); gpio_pull_up(SCL);
     gpio_init(DIR); gpio_set_dir(DIR, GPIO_OUT); gpio_put(DIR, 0);
-    gpio_init(LED_VERDE); gpio_set_dir(LED_VERDE, GPIO_OUT); gpio_put(LED_VERDE, 0);
-    gpio_init(LED_ROJO);  gpio_set_dir(LED_ROJO,  GPIO_OUT); gpio_put(LED_ROJO,  0);
+    gpio_init(LED_VERDE); gpio_set_dir(LED_VERDE, GPIO_OUT); gpio_put(LED_VERDE, 1);
+    gpio_init(LED_ROJO);  gpio_set_dir(LED_ROJO,  GPIO_OUT); gpio_put(LED_ROJO,  1);
     gpio_init(IN1);  gpio_set_dir(IN1,  GPIO_OUT); gpio_put(IN1,  0);
     gpio_init(IN2);  gpio_set_dir(IN2,  GPIO_OUT); gpio_put(IN2,  0);
-    gpio_init(COL_1); gpio_set_dir(COL_1, GPIO_OUT); gpio_put(COL_1, 1);  // columnas inactivas inicialmente
-    gpio_init(COL_2); gpio_set_dir(COL_2, GPIO_OUT); gpio_put(COL_2, 1);  // columnas inactivas inicialmente
-    gpio_init(COL_3); gpio_set_dir(COL_3, GPIO_OUT); gpio_put(COL_3, 1);  // columnas inactivas inicialmente
-    gpio_init(COL_4); gpio_set_dir(COL_4, GPIO_OUT); gpio_put(COL_4, 1);  // columnas inactivas inicialmente
-    gpio_init(FILA_1); gpio_set_dir(FILA_1, GPIO_IN); gpio_pull_up(FILA_1);
-    gpio_init(FILA_2); gpio_set_dir(FILA_2, GPIO_IN); gpio_pull_up(FILA_2);
-    gpio_init(FILA_3); gpio_set_dir(FILA_3, GPIO_IN); gpio_pull_up(FILA_3);
-    gpio_init(FILA_4); gpio_set_dir(FILA_4, GPIO_IN); gpio_pull_up(FILA_4);
-
+    for (int i = 0; i < FIL; i++) {
+        gpio_init(FILA_PINS[i]);
+        gpio_set_dir(FILA_PINS[i], GPIO_OUT);
+        gpio_put(FILA_PINS[i], 1);
+    }
+    for (int i = 0; i < COL; i++) {
+        gpio_init(COL_PINS[i]);
+        gpio_set_dir(COL_PINS[i], GPIO_IN);
+        gpio_pull_up(COL_PINS[i]);
+    }
     lcd_init(I2C_PORT, LCD_ADD);
     lcd_clear();
     pwm_user_init(ENA, PWM_FRECUENCIA);
@@ -558,22 +517,14 @@ void task_init(void *params) {
 
 int main() {
     stdio_init_all();
-/*    xTaskCreate(task_init, "Init", 1024, NULL, 4, NULL);
-    xTaskCreate(task_lcd, "LCD", 2048, NULL, 2, NULL);
-    xTaskCreate(task_keyboard, "Keyboard", 2048, NULL, 1, NULL);
-    xTaskCreate(task_i2c_guard, "I2C_Guard", 2048, NULL, 3, NULL);
-    xTaskCreate(task_encoder, "Encoder", 1024, NULL, 2, NULL);
-    xTaskCreate(task_control_pid, "PID", 2048, NULL, 2, NULL);
-    xTaskCreate(task_flags, "Flags", 1024, NULL, 1, NULL);
-    xTaskCreate(task_datalogger, "Datalogger", 2048, NULL, 1, NULL);*/
 
     xTaskCreate(task_init,        "Init",        configMINIMAL_STACK_SIZE * 2, NULL, 5, NULL);
     xTaskCreate(task_lcd,         "LCD",         configMINIMAL_STACK_SIZE * 4, NULL, 2, NULL);
-    xTaskCreate(task_keyboard,    "Keyboard",    configMINIMAL_STACK_SIZE * 3, NULL, 2, NULL);
-    xTaskCreate(task_i2c_guard,   "I2C_Guard",   configMINIMAL_STACK_SIZE * 4, NULL, 3, NULL);
+    xTaskCreate(task_keyboard,    "Keyboard",    configMINIMAL_STACK_SIZE * 4, NULL, 2, NULL);
+    xTaskCreate(task_i2c_guard,   "I2C_Guard",   configMINIMAL_STACK_SIZE * 6, NULL, 3, NULL);
     xTaskCreate(task_encoder,     "Encoder",     configMINIMAL_STACK_SIZE * 2, NULL, 3, NULL);
     xTaskCreate(task_control_pid, "PID",         configMINIMAL_STACK_SIZE * 4, NULL, 4, NULL);
-    xTaskCreate(task_flags,       "Flags",       configMINIMAL_STACK_SIZE * 2, NULL, 1, NULL);
+    xTaskCreate(task_flags,       "Flags",       configMINIMAL_STACK_SIZE * 2, NULL, 3, NULL);
     xTaskCreate(task_datalogger,  "Datalogger",  configMINIMAL_STACK_SIZE * 4, NULL, 1, NULL);
     vTaskStartScheduler();
     while (1);
