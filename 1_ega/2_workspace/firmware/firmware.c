@@ -43,8 +43,8 @@ const char teclas[4][4] = {
     {'*', '0', '#', 'D'}
 };
 
-#define PWM_FRECUENCIA 1000
-#define MUESTROMS 10
+#define PWM_FRECUENCIA 2000
+#define MUESTREOMS 10
 
 typedef struct {
     char linea1[16];
@@ -163,10 +163,10 @@ void task_encoder(void *params) {
 // Task: PID
 void task_control_pid(void *params) {
     // Parámetros PID
-    float kp = 4.0f;  // Ganancia proporcional
+    float kp = 6.0f;  // Ganancia proporcional
     float ki = 0.1f;  // Ganancia integral
-    float kd = 0.01f;  // Ganancia derivativa
-    float Ts = MUESTROMS / 1000.0f; // Periodo de muestreo en segundos
+    float kd = 0.0f;  // Ganancia derivativa
+    float Ts = MUESTREOMS / 1000.0f; // Periodo de muestreo en segundos
     float error_prev = 0.0f;
     float integral = 0.0f;
     int estable_count = 0;
@@ -185,7 +185,7 @@ void task_control_pid(void *params) {
 
         if (!pid_enable) {
             pwm_set_gpio_level(ENA, 0);
-            vTaskDelay(pdMS_TO_TICKS(MUESTROMS));
+            vTaskDelay(pdMS_TO_TICKS(MUESTREOMS));
             continue;
         }
 
@@ -222,13 +222,13 @@ void task_control_pid(void *params) {
         salida = (kp * error) + (ki * integral) + (kd * derivada);
 
         // Fuerza la salida en la banda de error media
-        if (fabsf(error) >= 5.0f && fabsf(error) <= 30.0f)
-        salida = 400.0f * (error > 0 ? 1.0f : -1.0f);
+        //if (fabsf(error) >= 8.0f && fabsf(error) <= 25.0f)
+        //salida = 300.0f * (error > 0 ? 1.0f : -1.0f);
 
         // Actualizar error previo
         error_prev = error;
 
-        salida = fmaxf(fminf(salida, 1000), -1000);
+        salida = fmaxf(fminf(salida, 500), -500);
 
         if (salida > 0) {
             motor_sentido_horario();        // CW
@@ -239,7 +239,7 @@ void task_control_pid(void *params) {
         }  
         xQueueOverwrite(q_pid, &salida);
         printf("Val=%0.f Sal=%0.f SetPoint:%0.f\n", ang,salida,configuracion_actual.setpoint);
-        vTaskDelay(pdMS_TO_TICKS(MUESTROMS));
+        vTaskDelay(pdMS_TO_TICKS(MUESTREOMS));
     }
 }
 
@@ -248,7 +248,7 @@ void task_flags(void *params) {
     while (1) {
         float ang;
         xQueuePeek(q_angulo, &ang, 0);
-        bool flag = fabsf(configuracion_actual.setpoint - ang) <= 3.0f;
+        bool flag = fabsf(configuracion_actual.setpoint - ang) <= 8.0f;
         gpio_put(LED_VERDE, flag);
         gpio_put(LED_ROJO, !flag);
         xQueueOverwrite(q_flag_led, &flag);
@@ -377,7 +377,7 @@ void task_keyboard(void *params) {
                         res.setpoint = configuracion_actual.setpoint;
                         xQueuePeek(q_pid, &res.salida_control, 0);
                         res.tipo_entrada = configuracion_actual.tipo_entrada;
-                        if(fabsf(configuracion_actual.setpoint - res.angulo) <= 3.0f)
+                        if(fabsf(configuracion_actual.setpoint - res.angulo) <= 8.0f)
                         res.flag_led = 1;
                         else res.flag_led = 0;
                         // Obtener hora desde RTC

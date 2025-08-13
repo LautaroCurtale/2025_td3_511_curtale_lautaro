@@ -20,7 +20,7 @@ void init_as5600_dir();
 void set_as5600_dir(uint8_t dir);
 
 uint8_t refresh_magnet_status(void);
-
-uint16_t get_angle_position();
+uint16_t get_filtered_angle_position(void);
+uint16_t get_angle_position(void);
 
 #endif
