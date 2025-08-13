@@ -1,3 +1,4 @@
+//Funciones para la lectura del teclado
 #include "teclado.h"
 #include "pico/stdlib.h"
 
@@ -12,7 +13,6 @@ char escanear_teclado() {
         for (int c = 0; c < COL; c++) {
             if (gpio_get(COL_PINS[c])==0) {
                 sleep_ms(200);  // debounce simple
-                //printf("Tecla presionada: %c\n", teclas[f][c]); 
                 return teclas[f][c];
             }
         }

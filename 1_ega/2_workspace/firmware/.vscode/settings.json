@@ -41,6 +41,11 @@
         "gpio.h": "c",
         "teclado.h": "c",
         "compare": "c",
-        "cstdint": "c"
+        "cstdint": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "span": "c",
+        "i2c.h": "c"
     }
 }

@@ -1,5 +1,5 @@
+//Incluye funciones para RTC y EEPROM
 #include "rtc.h"
-#include "hardware/i2c.h"
 
 
 static uint8_t dec_to_bcd(uint8_t val) {
@@ -11,7 +11,6 @@ static uint8_t bcd_to_dec(uint8_t val) {
 }
 
 void rtc_init(i2c_inst_t *i2c) {
-    // No se necesita configuración específica
 }
 
 void rtc_set_time(i2c_inst_t *i2c, const time_t *time) {
@@ -32,10 +31,9 @@ void rtc_get_time(i2c_inst_t *i2c, time_t *time) {
     uint8_t buffer[7];
     i2c_write_blocking(i2c, RTC_ADDR, &reg, 1, true);
     i2c_read_blocking(i2c, RTC_ADDR, buffer, 7, false);
-
-    time->second      = bcd_to_dec(buffer[0] & 0x7F);
-    time->minute      = bcd_to_dec(buffer[1]);
-    time->hour        = bcd_to_dec(buffer[2] & 0x3F);
+    time->second       = bcd_to_dec(buffer[0] & 0x7F);
+    time->minute       = bcd_to_dec(buffer[1]);
+    time->hour         = bcd_to_dec(buffer[2] & 0x3F);
     time->date         = bcd_to_dec(buffer[3]);
     time->day          = bcd_to_dec(buffer[4]);
     time->month        = bcd_to_dec(buffer[5]);
@@ -115,7 +113,7 @@ bool leer_ultimo_resultado(resultado_t* res) {
     return true;
 }
 
-// Lee un byte desde la RAM del DS1307
+// Lee un byte desde la RAM del DS3231
 bool eeprom_read_bytes(i2c_inst_t *i2c, uint8_t address, uint8_t *data) {
     if (address < 0x08 || address > 0x3F) return false;
 

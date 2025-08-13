@@ -1,3 +1,4 @@
+//Incluye funciones para RTC y EEPROM
 #ifndef _RTC_H_
 #define _RTC_H_
 
@@ -5,6 +6,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "pico/stdlib.h"
+#include "hardware/i2c.h"
 
 #define RTC_ADDR 0x68
 #define EEPROM_ADDR 0x57
@@ -53,14 +55,13 @@ void rtc_get_time(i2c_inst_t *i2c, time_t *time);
 bool eeprom_write_bytes(i2c_inst_t *i2c, uint8_t address, uint8_t data);
 bool eeprom_read_bytes(i2c_inst_t *i2c, uint8_t address, uint8_t *data);
 
-// Funciones para escribir y leer en la EEPROM AT24C32
+// Funciones para escribir y leer en la EEPROM
 void eeprom_write(uint16_t addr, const uint8_t *data, size_t len);
 void eeprom_read(uint16_t addr, uint8_t *data, size_t len);
 
 // Funciones EEPROM (para configuración y resultados)
 bool guardar_configuracion(const configuracion_t* conf);
 bool leer_ultima_configuracion(configuracion_t* conf);
-
 bool guardar_resultado(const resultado_t* res);
 bool leer_ultimo_resultado(resultado_t* res);
 

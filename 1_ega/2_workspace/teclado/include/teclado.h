@@ -1,3 +1,4 @@
+//Funciones para la lectura del teclado
 #ifndef TECLADO_H_
 #define TECLADO_H_
 
@@ -7,7 +8,6 @@
 
 #define FIL 4
 #define COL 4
-#define MAX_INPUT 32
 
 //Variables
 extern const uint FILA_PINS[];
@@ -16,4 +16,4 @@ extern const char teclas[4][4];
 
 
 char escanear_teclado(void);
-#endif /* DEFINICIONES_H_ */
+#endif

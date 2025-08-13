@@ -1,82 +1,39 @@
-#include "AS5600.h"
-#include <math.h>
+#include "as5600.h"
 
-#define AS5600_RAW_ANGLE_LSB 0x0E
-#define AS5600_RAW_ANGLE_MSB 0x0F
-
-uint8_t magnet_status, md, ml, mh, buffer_as6500[3];
-
-//extern i2c_inst_t *i2c_port; // Debe ser inicializado desde el firmware principal
-
-// Lee un byte desde un registro del AS5600
-static uint8_t as5600_read_reg(uint8_t reg) {
-    uint8_t val;
-    i2c_write_blocking(i2c0, AS5600_ADDRESS, &reg, 1, true);
-    i2c_read_blocking(i2c0, AS5600_ADDRESS, &val, 1, false);
-    return val;
-}
-
-void init_as5600_dir() {
+void init_as5600() {
     gpio_init(AS5600_DIR_PIN);
     gpio_set_dir(AS5600_DIR_PIN, GPIO_OUT);
+    gpio_put(AS5600_DIR_PIN, 0);
 }
 
 void set_as5600_dir(uint8_t dir) {
     gpio_put(AS5600_DIR_PIN, dir);
 }
 
-uint8_t refresh_magnet_status(void) {
-    uint8_t reg = 0x0B;
-    uint8_t val;
-    i2c_write_blocking(i2c0, AS5600_ADDRESS, &reg, 1, true);
-    i2c_read_blocking(i2c0, AS5600_ADDRESS, &val, 1, false);
+as5600_status_t get_as5600_status(i2c_inst_t *i2c) {
+    as5600_status_t status;
+    uint8_t buf;
+    i2c_write_blocking(i2c, AS5600_ADDRESS, (uint8_t[]){AS5600_STATUS_REG}, 1, true);
+    i2c_read_blocking(i2c, AS5600_ADDRESS, &buf, 1, false);
+    buf = buf >> 3;
+    status.mh  = buf & 0b001;
+    status.ml = (buf & 0b010) >> 1;
+    status.md = (buf & 0b100) >> 2;
+    status.valid = (status.md & !status.ml & !status.mh) ? 1 : 0;
 
-    magnet_status = (val >> 3) & 0x07;
-    mh = magnet_status & 0x01;
-    ml = (magnet_status >> 1) & 0x01;
-    md = (magnet_status >> 2) & 0x01;
-
-    return (md && !ml && !mh);
+    return status;
 }
 
-// Devuelve el �ngulo absoluto en grados (0� a 360�)
-/*
-uint16_t get_angle_position() {
-    if(!refresh_magnet_status()){
-        return 0;
-    }
-    uint8_t high = as5600_read_reg(AS5600_RAW_ANGLE_MSB) & 0x0F;
-    uint8_t low = as5600_read_reg(AS5600_RAW_ANGLE_LSB);
-    uint16_t raw_angle = (high << 8) | low;
-    return (float) (raw_angle * 360.0f / 4096.0f);
-}
-*/
-uint16_t get_filtered_angle_position() {
-    static float filtered_angle = 0.0f;
-
-    if (!refresh_magnet_status()) {
-        return filtered_angle;
-    }
-
-    uint8_t high = as5600_read_reg(AS5600_RAW_ANGLE_MSB) & 0x0F;
-    uint8_t low  = as5600_read_reg(AS5600_RAW_ANGLE_LSB);
-    uint16_t raw_angle = (high << 8) | low;
-
-    float angle = raw_angle * 360.0f / 4096.0f;
-
-    float alpha = 0.4;  // Cuanto más bajo, más suave
-    filtered_angle += alpha * (angle - filtered_angle);
-
-    return (float) filtered_angle;
+uint16_t get_as5600_angle(i2c_inst_t *i2c) {
+    uint8_t buffer[2];
+    i2c_write_blocking(i2c, AS5600_ADDRESS, (uint8_t[]){AS5600_ANGLE_REG_HIGH}, 1, true);
+    i2c_read_blocking(i2c, AS5600_ADDRESS, buffer, 2, false);
+    uint16_t angle = ((buffer[0] & 0x0F) << 8 | buffer[1]);
+    return angle;
 }
 
-uint16_t get_angle_position() {
-    static float last_valid_angle = 0.0f;
-    float angle = get_filtered_angle_position();
-
-    if (fabsf(angle - last_valid_angle) > 0.01f) {  // Ignora cambios < 0.01°
-        last_valid_angle = angle;
-    }
-
-    return (float) last_valid_angle;
+uint16_t get_angle_position(i2c_inst_t *i2c) {
+    uint16_t raw_angle = get_as5600_angle(i2c);  // Obtiene el valor bruto del ángulo (0-4095)
+    uint16_t angle_in_degrees = (raw_angle * 360) / 4096;  // Escala el valor al rango 0-360°
+    return (float) angle_in_degrees;
 }
