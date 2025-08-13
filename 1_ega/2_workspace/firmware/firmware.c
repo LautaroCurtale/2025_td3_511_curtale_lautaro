@@ -43,7 +43,7 @@ const char teclas[4][4] = {
     {'*', '0', '#', 'D'}
 };
 
-#define PWM_FRECUENCIA 10000
+#define PWM_FRECUENCIA 1000
 #define MUESTROMS 10
 
 typedef struct {
@@ -163,10 +163,10 @@ void task_encoder(void *params) {
 // Task: PID
 void task_control_pid(void *params) {
     // Parámetros PID
-    float kp = 0.9f;  // Ganancia proporcional
-    float ki = 0.01f;  // Ganancia integral
-    float kd = 0.001f;  // Ganancia derivativa
-    float Ts = 0.01f; // Periodo de muestreo en segundos
+    float kp = 4.0f;  // Ganancia proporcional
+    float ki = 0.1f;  // Ganancia integral
+    float kd = 0.01f;  // Ganancia derivativa
+    float Ts = MUESTROMS / 1000.0f; // Periodo de muestreo en segundos
     float error_prev = 0.0f;
     float integral = 0.0f;
     int estable_count = 0;
@@ -221,10 +221,14 @@ void task_control_pid(void *params) {
         // Salida PID
         salida = (kp * error) + (ki * integral) + (kd * derivada);
 
+        // Fuerza la salida en la banda de error media
+        if (fabsf(error) >= 5.0f && fabsf(error) <= 30.0f)
+        salida = 400.0f * (error > 0 ? 1.0f : -1.0f);
+
         // Actualizar error previo
         error_prev = error;
 
-        salida = fmaxf(fminf(salida, 700), -700);
+        salida = fmaxf(fminf(salida, 1000), -1000);
 
         if (salida > 0) {
             motor_sentido_horario();        // CW
@@ -232,9 +236,9 @@ void task_control_pid(void *params) {
         } else if (salida < 0) {
             motor_sentido_antihorario();    // CCW
             pwm_set_gpio_level(ENA, (uint16_t) -salida);
-        } 
+        }  
         xQueueOverwrite(q_pid, &salida);
-        printf("Val=%0.f Sal=%0.f?\n", ang,salida);
+        printf("Val=%0.f Sal=%0.f SetPoint:%0.f\n", ang,salida,configuracion_actual.setpoint);
         vTaskDelay(pdMS_TO_TICKS(MUESTROMS));
     }
 }
