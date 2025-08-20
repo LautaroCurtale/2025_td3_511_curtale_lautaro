@@ -83,7 +83,6 @@ typedef struct {
 } i2c_guard_t;
 
 // QueueHandlers
-QueueHandle_t q_tecla, q_lcd, q_angulo, q_pid, q_flag_led, q_datalogger;
 QueueHandle_t q_lcd;
 QueueHandle_t q_angulo;
 QueueHandle_t q_pid;
@@ -178,8 +177,8 @@ void task_encoder(void *params) {
 // Task: PID
 void task_control_pid(void *params) {
     // Parámetros PID
-    float kp = 6.0f;  // Ganancia proporcional
-    float ki = 0.1f;  // Ganancia integral
+    float kp = 15.0f;  // Ganancia proporcional
+    float ki = 0.3f;  // Ganancia integral
     float kd = 0.01f;  // Ganancia derivativa
     float Ts = MUESTREOMS / 1000.0f; // Periodo de muestreo
     float error_prev = 0.0f;
@@ -231,8 +230,8 @@ void task_control_pid(void *params) {
         salida = (kp * error) + (ki * integral) + (kd * derivada);
 
         // Fuerza la salida en la banda de error media
-        if (fabsf(error) >= 10.0f && fabsf(error) <= 45.0f)
-        salida = 350.0f * (error > 0 ? 1.0f : -1.0f);
+        //if (fabsf(error) >= 10.0f && fabsf(error) <= 45.0f)
+        //salida = 350.0f * (error > 0 ? 1.0f : -1.0f);
 
         // Actualizar error previo
         error_prev = error;
@@ -521,7 +520,6 @@ void task_init(void *params) {
     init_as5600();
     pwm_user_init(ENA, PWM_FRECUENCIA);
 
-    q_tecla = xQueueCreate(1, sizeof(char));
     q_lcd = xQueueCreate(2, sizeof(lcd_msg_t));
     q_angulo = xQueueCreate(1, sizeof(float));
     q_pid = xQueueCreate(1, sizeof(float));
@@ -542,7 +540,7 @@ int main() {
     xTaskCreate(task_i2c_guard,   "I2C_Guard",   configMINIMAL_STACK_SIZE * 6, NULL, 2, NULL);
     xTaskCreate(task_encoder,     "Encoder",     configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
     xTaskCreate(task_control_pid, "PID",         configMINIMAL_STACK_SIZE * 4, NULL, 3, NULL);
-    xTaskCreate(task_flags,       "Flags",       configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
+    xTaskCreate(task_flags,       "LEDS",        configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
     xTaskCreate(task_datalogger,  "Datalogger",  configMINIMAL_STACK_SIZE * 4, NULL, 2, NULL);
 
     vTaskStartScheduler();
