@@ -177,15 +177,18 @@ void task_encoder(void *params) {
 // Task: PID
 void task_control_pid(void *params) {
     // Parámetros PID
-    float kp = 15.0f;  // Ganancia proporcional
-    float ki = 0.3f;  // Ganancia integral
-    float kd = 0.01f;  // Ganancia derivativa
+    float kp = 17.0f;  // Ganancia proporcional
+    float ki = 0.2f;  // Ganancia integral
+    float kd = 0.05f;  // Ganancia derivativa
     float Ts = MUESTREOMS / 1000.0f; // Periodo de muestreo
     float error_prev = 0.0f;
     float integral = 0.0f;
     bool pid_enable = false;
     float ref = 0.0f;
     float ang = 0, salida = 0;
+    float coef_velocidad = 0;
+    float vel_max = 5.0f; // Movimiento rapido, 0.5s para 180 grados
+    float vel_min = 0.18f; // Movimiento lento, 10s para 180 grados
 
     while (1) {
         // Chequea si hay señal para habilitar el PID
@@ -203,7 +206,8 @@ void task_control_pid(void *params) {
         if (configuracion_actual.tipo_entrada == 0) {
             ref = configuracion_actual.setpoint;
         } else {
-            ref += configuracion_actual.pendiente * 0.02f;
+            coef_velocidad = configuracion_actual.pendiente; // Valor de 1 a 100
+            ref += vel_min + (coef_velocidad - 1.0f) * (vel_max - vel_min) / 99.0f;
             if (ref > configuracion_actual.setpoint) ref = configuracion_actual.setpoint;
         }
 
@@ -229,10 +233,6 @@ void task_control_pid(void *params) {
         // Salida PID
         salida = (kp * error) + (ki * integral) + (kd * derivada);
 
-        // Fuerza la salida en la banda de error media
-        //if (fabsf(error) >= 10.0f && fabsf(error) <= 45.0f)
-        //salida = 350.0f * (error > 0 ? 1.0f : -1.0f);
-
         // Actualizar error previo
         error_prev = error;
 
@@ -256,7 +256,7 @@ void task_flags(void *params) {
     while (1) {
         float ang;
         xQueuePeek(q_angulo, &ang, 0);
-        bool flag = fabsf(fmodf((configuracion_actual.setpoint - ang + 180.0f), 360.0f) - 180.0f) <= 10.0f;
+        bool flag = fabsf(fmodf((configuracion_actual.setpoint - ang + 180.0f), 360.0f) - 180.0f) <= 3.0f;
         gpio_put(LED_VERDE, flag);
         gpio_put(LED_ROJO, !flag);
         xQueueOverwrite(q_flag_led, &flag);
@@ -475,7 +475,7 @@ void task_keyboard(void *params) {
                     xQueueSend(q_lcd, &msg, 0);
                     } else if (tecla == '#') {
                         configuracion_actual.setpoint = fminf(valorset, 360.0f);
-                        configuracion_actual.pendiente = fminf(valorpend, 30.0f);
+                        configuracion_actual.pendiente = fminf(valorpend, 100.0f);
                         snprintf(msg.linea1, 16, "Guardado       ");
                         snprintf(msg.linea2, 16, "               ");
                         xQueueSend(q_lcd, &msg, 0);
@@ -533,13 +533,12 @@ void task_init(void *params) {
 
 int main() {
     stdio_init_all();
-
-    xTaskCreate(task_init,        "Init",        configMINIMAL_STACK_SIZE * 2, NULL, 4, NULL);
+    xTaskCreate(task_init,        "Init",        configMINIMAL_STACK_SIZE * 3, NULL, 4, NULL);
     xTaskCreate(task_lcd,         "LCD",         configMINIMAL_STACK_SIZE * 4, NULL, 1, NULL);
     xTaskCreate(task_keyboard,    "Keyboard",    configMINIMAL_STACK_SIZE * 4, NULL, 1, NULL);
     xTaskCreate(task_i2c_guard,   "I2C_Guard",   configMINIMAL_STACK_SIZE * 6, NULL, 2, NULL);
     xTaskCreate(task_encoder,     "Encoder",     configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
-    xTaskCreate(task_control_pid, "PID",         configMINIMAL_STACK_SIZE * 4, NULL, 3, NULL);
+    xTaskCreate(task_control_pid, "PID",         configMINIMAL_STACK_SIZE * 5, NULL, 3, NULL);
     xTaskCreate(task_flags,       "LEDS",        configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
     xTaskCreate(task_datalogger,  "Datalogger",  configMINIMAL_STACK_SIZE * 4, NULL, 2, NULL);
 
