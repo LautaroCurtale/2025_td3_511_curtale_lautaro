@@ -177,9 +177,9 @@ void task_encoder(void *params) {
 // Task: PID
 void task_control_pid(void *params) {
     // Parámetros PID
-    float kp = 17.0f;  // Ganancia proporcional
+    float kp = 18.0f;  // Ganancia proporcional
     float ki = 0.2f;  // Ganancia integral
-    float kd = 0.05f;  // Ganancia derivativa
+    float kd = 0.1f;  // Ganancia derivativa
     float Ts = MUESTREOMS / 1000.0f; // Periodo de muestreo
     float error_prev = 0.0f;
     float integral = 0.0f;
@@ -256,7 +256,7 @@ void task_flags(void *params) {
     while (1) {
         float ang;
         xQueuePeek(q_angulo, &ang, 0);
-        bool flag = fabsf(fmodf((configuracion_actual.setpoint - ang + 180.0f), 360.0f) - 180.0f) <= 3.0f;
+        bool flag = fabsf(fmodf((configuracion_actual.setpoint - ang + 180.0f), 360.0f) - 180.0f) <= 5.0f;
         gpio_put(LED_VERDE, flag);
         gpio_put(LED_ROJO, !flag);
         xQueueOverwrite(q_flag_led, &flag);
