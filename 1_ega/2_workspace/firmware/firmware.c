@@ -86,7 +86,6 @@ typedef struct {
 QueueHandle_t q_lcd;
 QueueHandle_t q_angulo;
 QueueHandle_t q_pid;
-QueueHandle_t q_flag_led;
 QueueHandle_t q_datalogger;
 QueueHandle_t q_i2c_guard;
 QueueHandle_t q_pid_enable;
@@ -208,7 +207,8 @@ void task_control_pid(void *params) {
         } else {
             coef_velocidad = configuracion_actual.pendiente; // Valor de 1 a 100
             ref += vel_min + (coef_velocidad - 1.0f) * (vel_max - vel_min) / 99.0f;
-            if (ref > configuracion_actual.setpoint) ref = configuracion_actual.setpoint;
+            if (ref > configuracion_actual.setpoint) 
+            ref = configuracion_actual.setpoint;
         }
 
         float error = ref - ang;
@@ -259,7 +259,6 @@ void task_flags(void *params) {
         bool flag = fabsf(fmodf((configuracion_actual.setpoint - ang + 180.0f), 360.0f) - 180.0f) <= 5.0f;
         gpio_put(LED_VERDE, flag);
         gpio_put(LED_ROJO, !flag);
-        xQueueOverwrite(q_flag_led, &flag);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -379,7 +378,7 @@ void task_keyboard(void *params) {
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                     case '*': 
-                    enable = false;
+                        enable = false;
                         xQueueOverwrite(q_pid_enable, &enable);
                         xQueuePeek(q_angulo, &res.angulo, 0);
                         res.setpoint = configuracion_actual.setpoint;
@@ -411,7 +410,6 @@ void task_keyboard(void *params) {
                         // Mensaje LCD
                         snprintf(msg.linea1, 16, "PID Desactivado");
                         snprintf(msg.linea2, 16, "Guarda Result. ");
-                        xQueueSend(q_flag_led, &flag_led, 0);
                         xQueueSend(q_lcd, &msg, 0);
                         break;
 
@@ -523,7 +521,6 @@ void task_init(void *params) {
     q_lcd = xQueueCreate(2, sizeof(lcd_msg_t));
     q_angulo = xQueueCreate(1, sizeof(float));
     q_pid = xQueueCreate(1, sizeof(float));
-    q_flag_led = xQueueCreate(1, sizeof(bool));
     q_i2c_guard = xQueueCreate(8, sizeof(i2c_guard_t));
     q_datalogger = xQueueCreate(4, sizeof(datalogger_msg_t));
     q_pid_enable = xQueueCreate(1, sizeof(bool));

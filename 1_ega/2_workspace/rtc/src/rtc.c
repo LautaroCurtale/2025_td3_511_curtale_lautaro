@@ -129,6 +129,7 @@ void eeprom_write(uint16_t addr, const uint8_t *data, size_t len) {
         buf[2] = data[i];            // Byte a escribir
 
         i2c_write_blocking(I2C_PORT, EEPROM_ADDR, buf, 3, false);
+        sleep_ms(5);
         addr++;
     }
 }
