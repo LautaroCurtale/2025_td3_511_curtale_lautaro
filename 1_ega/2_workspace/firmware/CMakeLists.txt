@@ -37,6 +37,9 @@ pico_sdk_init()
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../freertos ${CMAKE_BINARY_DIR}/freertos)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../lcd ${CMAKE_BINARY_DIR}/lcd)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../helper ${CMAKE_BINARY_DIR}/helper)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../rtc ${CMAKE_BINARY_DIR}/rtc)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../teclado ${CMAKE_BINARY_DIR}/teclado)
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../as5600 ${CMAKE_BINARY_DIR}/as5600)
 
 # Add executable. Default name is the project name, version 0.1
 
@@ -47,7 +50,7 @@ pico_set_program_version(firmware "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(firmware 0)
-pico_enable_stdio_usb(firmware 0)
+pico_enable_stdio_usb(firmware 1)
 
 # Add the standard library to the build
 target_link_libraries(firmware
@@ -63,6 +66,9 @@ target_link_libraries(firmware
         freertos
         lcd
         helper
+        rtc
+        as5600
+        teclado
         )
 
 pico_add_extra_outputs(firmware)
