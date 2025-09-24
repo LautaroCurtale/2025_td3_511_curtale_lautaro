@@ -42,8 +42,9 @@ const char teclas[4][4] = {
     {'*', '0', '#', 'D'}
 };
 
-#define PWM_FRECUENCIA 2000
-#define MUESTREOMS 10
+#define PWM_FRECUENCIA 10000
+#define MIN_PWM 78
+#define MUESTREOMS 20
 
 
 //Estructuras Dispositivos
@@ -97,6 +98,7 @@ configuracion_t configuracion_actual = {90.0f, 0.0f, 0};
 void set_motor_pwm(uint8_t gpio);
 void motor_sentido_antihorario();
 void motor_sentido_horario();
+void motor_detenido();
 
 //Tareas
 
@@ -176,7 +178,7 @@ void task_encoder(void *params) {
 // Task: PID
 void task_control_pid(void *params) {
     // Parámetros PID
-    float kp = 18.0f;  // Ganancia proporcional
+    float kp = 6.0f;  // Ganancia proporcional
     float ki = 0.2f;  // Ganancia integral
     float kd = 0.1f;  // Ganancia derivativa
     float Ts = MUESTREOMS / 1000.0f; // Periodo de muestreo
@@ -188,6 +190,7 @@ void task_control_pid(void *params) {
     float coef_velocidad = 0;
     float vel_max = 5.0f; // Movimiento rapido, 0.5s para 180 grados
     float vel_min = 0.18f; // Movimiento lento, 10s para 180 grados
+    float error_aceptable = 2.0f;
 
     while (1) {
         // Chequea si hay señal para habilitar el PID
@@ -236,7 +239,18 @@ void task_control_pid(void *params) {
         // Actualizar error previo
         error_prev = error;
 
-        salida = fmaxf(fminf(salida, 5000), -5000);
+        if(fabs(error) < error_aceptable)
+        motor_detenido(); //Para el motor
+
+
+        salida = fmaxf(fminf(salida, 1000), -1000);
+/*
+        // PWM mínimo para mover el motor
+        if (fabs(salida) < MIN_PWM) {
+            if (salida > 0) 
+            salida = MIN_PWM;
+            else salida = -MIN_PWM;
+        }*/
 
         if (salida > 0) {
             motor_sentido_horario();        // Clockwise
@@ -244,7 +258,7 @@ void task_control_pid(void *params) {
         } else if (salida < 0) {
             motor_sentido_antihorario();    // Counterclockwise
             pwm_set_gpio_level(ENA, (uint16_t) -salida);
-        }  
+        }
 
         xQueueOverwrite(q_pid, &salida);
         vTaskDelay(pdMS_TO_TICKS(MUESTREOMS));
@@ -256,7 +270,7 @@ void task_flags(void *params) {
     while (1) {
         float ang;
         xQueuePeek(q_angulo, &ang, 0);
-        bool flag = fabsf(fmodf((configuracion_actual.setpoint - ang + 180.0f), 360.0f) - 180.0f) <= 5.0f;
+        bool flag = fabsf(fmodf((configuracion_actual.setpoint - ang + 180.0f), 360.0f) - 180.0f) <= 3.0f;
         gpio_put(LED_VERDE, flag);
         gpio_put(LED_ROJO, !flag);
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -563,4 +577,9 @@ void motor_sentido_horario() {
 void motor_sentido_antihorario() {
     gpio_put(IN1, 0);
     gpio_put(IN2, 1);
+}
+
+void motor_detenido() {
+    gpio_put(IN1, 0);
+    gpio_put(IN2, 0);
 }
