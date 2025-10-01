@@ -43,8 +43,8 @@ const char teclas[4][4] = {
 };
 
 #define PWM_FRECUENCIA 10000
-#define MIN_PWM 78
-#define MUESTREOMS 20
+#define MIN_PWM 80
+#define MUESTREOMS 10
 
 
 //Estructuras Dispositivos
@@ -174,30 +174,26 @@ void task_encoder(void *params) {
     }
 }
 
-
-// Task: PID
+//Task PID
 void task_control_pid(void *params) {
-    // Parámetros PID
-    float kp = 6.0f;  // Ganancia proporcional
-    float ki = 0.2f;  // Ganancia integral
-    float kd = 0.1f;  // Ganancia derivativa
-    float Ts = MUESTREOMS / 1000.0f; // Periodo de muestreo
+    float kp = 4.0f;
+    float ki = 0.05f;
+    float kd = 0.1f;
+    float Ts = MUESTREOMS / 1000.0f;
+
     float error_prev = 0.0f;
-    float integral = 0.0f;
-    bool pid_enable = false;
-    float ref = 0.0f;
-    float ang = 0, salida = 0;
+    float integral   = 0.0f;
+    bool pid_enable  = false;
+    float ref = 0.0f, ang = 0, salida = 0;
     float coef_velocidad = 0;
-    float vel_max = 5.0f; // Movimiento rapido, 0.5s para 180 grados
-    float vel_min = 0.18f; // Movimiento lento, 10s para 180 grados
-    float error_aceptable = 2.0f;
+    float vel_max = 5.0f;
+    float vel_min = 0.18f;
+    float error_aceptable = 1.0f;
 
     while (1) {
-        // Chequea si hay señal para habilitar el PID
         bool cmd;
-        if (xQueuePeek(q_pid_enable, &cmd, 0)) {
-            pid_enable = cmd;
-        }
+        if (xQueuePeek(q_pid_enable, &cmd, 0)) pid_enable = cmd;
+
         if (!pid_enable) {
             pwm_set_gpio_level(ENA, 0);
             vTaskDelay(pdMS_TO_TICKS(MUESTREOMS));
@@ -205,65 +201,52 @@ void task_control_pid(void *params) {
         }
 
         xQueuePeek(q_angulo, &ang, 0);
+
         if (configuracion_actual.tipo_entrada == 0) {
             ref = configuracion_actual.setpoint;
         } else {
-            coef_velocidad = configuracion_actual.pendiente; // Valor de 1 a 100
+            coef_velocidad = configuracion_actual.pendiente;
             ref += vel_min + (coef_velocidad - 1.0f) * (vel_max - vel_min) / 99.0f;
-            if (ref > configuracion_actual.setpoint) 
-            ref = configuracion_actual.setpoint;
+            if (ref > configuracion_actual.setpoint) ref = configuracion_actual.setpoint;
         }
 
         float error = ref - ang;
+        if (error > 180.0f) error -= 360.0f;
+        else if (error < -180.0f) error += 360.0f;
 
-        // "Wrap" de error a rango [-180, +180] grados
-        if (error > 180.0f)
-            error -= 360.0f;
-        else if (error < -180.0f)
-            error += 360.0f;
-
-        // Componente integral (con anti-windup)
         integral += error * Ts;
-        
-        if(integral >= 100)
-        integral = 100;
-        if(integral <= -100)
-        integral = -100;
+        if (integral > 500) integral = 500;
+        if (integral < -500) integral = -500;
 
-        // Componente derivativa
         float derivada = (error - error_prev) / Ts;
-
-        // Salida PID
         salida = (kp * error) + (ki * integral) + (kd * derivada);
-
-        // Actualizar error previo
         error_prev = error;
 
-        if(fabs(error) < error_aceptable)
-        motor_detenido(); //Para el motor
-
-
         salida = fmaxf(fminf(salida, 1000), -1000);
-/*
-        // PWM mínimo para mover el motor
-        if (fabs(salida) < MIN_PWM) {
-            if (salida > 0) 
-            salida = MIN_PWM;
-            else salida = -MIN_PWM;
-        }*/
+
+        if (fabs(error) > error_aceptable) {
+            if (fabs(salida) < MIN_PWM) {
+                salida = (salida > 0) ? MIN_PWM : -MIN_PWM;
+            }
+        } else {
+            motor_detenido();
+            salida = 0;
+            integral = 0; // evita arrastre
+        }
 
         if (salida > 0) {
-            motor_sentido_horario();        // Clockwise
+            motor_sentido_horario();
             pwm_set_gpio_level(ENA, (uint16_t) salida);
         } else if (salida < 0) {
-            motor_sentido_antihorario();    // Counterclockwise
-            pwm_set_gpio_level(ENA, (uint16_t) -salida);
+            motor_sentido_antihorario();
+            pwm_set_gpio_level(ENA, (uint16_t)(-salida));
         }
 
         xQueueOverwrite(q_pid, &salida);
         vTaskDelay(pdMS_TO_TICKS(MUESTREOMS));
     }
 }
+
 
 // Task: Flags (LEDs)
 void task_flags(void *params) {
