@@ -1,6 +1,6 @@
 # Etiqueta para definir el nombre del archivo con el codigo del modulo
 FILE := kernel_module
-DEV_TREE := egb
+DEV_TREE := uart0-egb
 # Define el autor del modulo (coincide con el del codigo del modulo)
 AUTHOR := Curtale-Torreblanca
 # Directorio donde se encuentra el kernel

@@ -3,7 +3,7 @@
 import os, re, sys, termios
 
 # MODIFICADO: Apunta al nuevo device file
-DEV_PATH = "/dev/Curtale-Torreblanca" 
+DEV_PATH = "/dev/egb" 
 
 def main():
     menu = 0

@@ -1,0 +1,1 @@
+savedcmd_/home/lautaro/3_gpos/build/kernel_module.ko := arm-linux-gnueabihf-ld -r -EL -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T arch/arm/module.lds -o /home/lautaro/3_gpos/build/kernel_module.ko /home/lautaro/3_gpos/build/kernel_module.o /home/lautaro/3_gpos/build/kernel_module.mod.o /home/lautaro/3_gpos/build/.module-common.o
