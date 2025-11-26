@@ -23,13 +23,19 @@ def enviar_uart(cmd):
         return "Error"
 
 def parse_val(resp):
-    """Convierte 'clave=valor' a float de forma segura"""
+    """Convierte 'clave=valor' a float/int de forma segura"""
     try:
         if "=" in resp:
-            return float(resp.split('=')[1])
-        return 0.0
+            value_str = resp.split('=')[1]
+            # Si el valor tiene decimales (ej: 90.5 o 2.5), lo dejamos en float
+            if '.' in value_str:
+                return float(value_str)
+            # Si no tiene decimales (ej: 282, 90, 0), lo convertimos a entero
+            else:
+                return int(value_str)
+        return 0
     except:
-        return 0.0
+        return 0
 
 @app.route('/')
 def index():
@@ -78,40 +84,20 @@ def get_data():
     raw_spo = enviar_uart("get spo")
     # 4. Pedir Tipo Entrada (Leido del micro)
     raw_tip = enviar_uart("get tip")
-    # 5. Pedir Pendiente (Opcional, si el firmware lo soporta)
-    # raw_pen = enviar_uart("get pen") 
-
-    # Nota: get pen no lo agregamos al firmware abajo para ahorrar espacio,
-    # pero el HTML lo muestra. Si quieres leerlo del micro, avísame.
-    # Por ahora el HTML mostrará 0 o lo que le mandes.
-
-    return jsonify({
-        'error': parse_val(raw_err),
-        'pwm':   parse_val(raw_pwm),
-        'spo':   parse_val(raw_spo),
-        'tip':   parse_val(raw_tip),
-        'pen':   0.0, # Placeholder si no leemos pen del micro
-        'ang':   0.0  # El angulo lo calculamos en el front o pedimos 'get ang'
-    })
-
-# Agregamos una ruta extra para pedir el angulo si lo quieres mostrar
-@app.route('/api/data_full')
-def get_data_full():
-    # Esta ruta pide TODO, incluyendo angulo
-    raw_err = enviar_uart("get err")
-    raw_ang = enviar_uart("get ang") # <--- Pide angulo
-    raw_pwm = enviar_uart("get pwm")
-    raw_spo = enviar_uart("get spo")
-    raw_tip = enviar_uart("get tip")
+    # 5. Pedir Pendiente 
+    raw_pen = enviar_uart("get pen") 
+    # 6. Pedir Angulo 
+    raw_ang = enviar_uart("get ang")
 
     return jsonify({
         'error': parse_val(raw_err),
         'ang':   parse_val(raw_ang),
-        'pwm':   parse_val(raw_pwm),
-        'spo':   parse_val(raw_spo),
-        'tip':   parse_val(raw_tip),
-        'pen':   0.0 
+        'pwm':   parse_val(raw_pwm), 
+        'spo':   parse_val(raw_spo), 
+        'tip':   parse_val(raw_tip), 
+        'pen':   parse_val(raw_pen), 
     })
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)

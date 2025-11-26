@@ -31,10 +31,12 @@ typedef struct __attribute__((packed)) {
     uint8_t second;
 } time_t;
 
-typedef struct __attribute__((packed)) {
+// Estructura de Configuración (Reconstruida para compilar todo junto)
+typedef struct {
     float setpoint;
     float pendiente;
-    bool tipo_entrada; // 0 = escalón, 1 = rampa
+    bool tipo_entrada; // 0: Escalón, 1: Rampa
+    float banda_error; // Agregado para soportar 'set bde'
     time_t fecha;
 } configuracion_t;
 

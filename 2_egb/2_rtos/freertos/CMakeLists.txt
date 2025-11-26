@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
 # Conditionally set Pico core (RP2350_ARM_NTZ for pico2 / RP2040 for pico)
-if(${PICO_BOARD} STREQUAL "pico2" OR ${PICO_BOARD} STREQUAL "pico2_w")
+if(${PICO_BOARD} STREQUAL "pico2_w" OR ${PICO_BOARD} STREQUAL "pico2_w")
     set(CORE RP2350_ARM_NTZ)
 elseif(${PICO_BOARD} STREQUAL "pico" OR ${PICO_BOARD} STREQUAL "pico_w")
     set(CORE RP2040)

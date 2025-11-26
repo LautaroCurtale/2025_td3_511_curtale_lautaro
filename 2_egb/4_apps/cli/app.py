@@ -118,9 +118,9 @@ def main():
             case 2:
                 opc = menu_get()
                 match opc:
-                    case "1": msg += " ang" # Ángulo (se cambio de "get ang" a solo "ang")
-                    case "2": msg += " pwm" # Salida PWM
-                    case "3": msg += " err" # Error
+                    case "1": msg += "ang" # Ángulo (se cambio de "get ang" a solo "ang")
+                    case "2": msg += "pwm" # Salida PWM
+                    case "3": msg += "err" # Error
                     case "4": menu = 0
                     case _:
                         print("\nOpción invalida")
@@ -210,6 +210,6 @@ if __name__ == "__main__":
         
     if not os.path.exists(DEV_PATH):
         print(f"Error: Dispositivo {DEV_PATH} no encontrado.")
-        print("Asegúrese de que el módulo del kernel ('pos_ctrl') esté cargado.")
+        print("Asegúrese de que el módulo del kernel ('egb') esté cargado.")
     else:
         main()

@@ -67,7 +67,7 @@
  * @brief Cantidad de bytes de memoria dinámica disponibles para FreeRTOS
  * @see Barry, R. "Mastering the FreeRTOS Real Time Kernel", Sección 2.2
  */
-#define configTOTAL_HEAP_SIZE 4096
+#define configTOTAL_HEAP_SIZE 32768
 /**
  * @brief Cantidad de caracteres que se le pueden asignar al nombre de una tarea para debugging
  * @see Barry, R. "Mastering the FreeRTOS Real Time Kernel", Sección 2.2
