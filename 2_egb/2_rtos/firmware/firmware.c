@@ -55,7 +55,7 @@ typedef enum {                          // Distintas variables accesibles por UA
     VAR_ANG, 
     VAR_PWM, 
     VAR_ERR, 
-    VAR_SON
+    VAR_ENA
 } cmd_variable_t;
 
 typedef struct {                        // Estructura para identificar variable
@@ -573,6 +573,7 @@ void task_uart(void *params) {
         {"ang", VAR_ANG},
         {"pwm", VAR_PWM},
         {"err", VAR_ERR},
+        {"ena", VAR_ENA},
     };
     char *tipo, *variable, *dato; // Variables a obtener por UART
     uint8_t i = 0, j, recepcion = 0, error = 0; // Se elimina 'inicio'
@@ -637,15 +638,15 @@ void task_uart(void *params) {
                 }
             }
             
-            // 3. Verificamos tipo de variable (CORRECCIÓN: límite a 7)
+            // 3. Verificamos tipo de variable (CORRECCIÓN: límite a 8)
             if(!error && variable != NULL) {
-                for(j = 0; j < 7; j++) { // j < 7: Solo hay 7 elementos
+                for(j = 0; j < 8; j++) { // j < 7: Solo hay 7 elementos
                     if(!strcmp(variable, var_map[j].cmd)) {
                         variable_i = var_map[j].var;
                         break;
                     }
                 }
-                if(j == 7) error = 3; // Error de variable desconocida
+                if(j == 8) error = 3; // Error de variable desconocida
             } else if (!error) {
                 error = 3; // Error si falta la variable
             }
@@ -656,7 +657,7 @@ void task_uart(void *params) {
                 float error_ang = config_uart.setpoint - result_uart.angulo;
                 if (error_ang > 180.0f) error_ang -= 360.0f;
                 else if (error_ang < -180.0f) error_ang += 360.0f;
-                result_uart.error = fabsf(error_ang);
+                result_uart.error = error_ang;
                 
                 if(tipo_i == CMD_GET) {
                     switch(variable_i) {
@@ -680,6 +681,13 @@ void task_uart(void *params) {
                             case VAR_PEN: sscanf(dato, "%f", &config_uart.pendiente); break;
                             case VAR_BDE: sscanf(dato, "%f", &config_uart.banda_error); break;
                             case VAR_TIP: sscanf(dato, "%d", &config_uart.tipo_entrada); break;
+                            case VAR_SON:
+                                int val_enable;
+                                sscanf(dato, "%d", &val_enable);
+                                bool cmd_bool = (val_enable > 0);
+                                // Escribimos en la cola que controla el PID (misma que usa el teclado)
+                                xQueueOverwrite(q_pid_enable, &cmd_bool);
+                                break;
                             // No se puede "setear" un ángulo, PWM o error (son salidas)
                             case VAR_ANG:
                             case VAR_PWM:
