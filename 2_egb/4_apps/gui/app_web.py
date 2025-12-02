@@ -1,26 +1,28 @@
 import os
 import time
 from flask import Flask, render_template, jsonify, request
+from threading import Lock  # <--- 1. Importar Lock
 
 app = Flask(__name__)
+uart_lock = Lock()
 
 # Ruta al dispositivo del kernel
 DEV_PATH = "/dev/egb"
 
 def enviar_uart(cmd):
-    """Envía un comando al driver y espera respuesta"""
-    try:
-        # Escribir comando
-        with open(DEV_PATH, "w") as dev:
-            dev.write(cmd + "\n")
-        
-        # Leer respuesta (bloqueante hasta que el Pico responda)
-        with open(DEV_PATH, "r") as dev:
-            resp = dev.read().strip()
-        return resp
-    except Exception as e:
-        print(f"Error UART: {e}")
-        return "Error"
+    with uart_lock:         # <--- 3. Usar el candado aquí
+        try:
+            # Escribir comando
+            with open(DEV_PATH, "w") as dev:
+                dev.write(cmd + "\n") 
+            # Leer respuesta
+            with open(DEV_PATH, "r") as dev:
+                resp = dev.read().strip()
+            return resp
+        except Exception as e:
+            print(f"Error UART: {e}")
+            return "Error"
+
 
 def parse_val(resp):
     """Convierte 'clave=valor' a float/int de forma segura"""
@@ -97,6 +99,20 @@ def get_data():
         'tip':   parse_val(raw_tip), 
         'pen':   parse_val(raw_pen), 
     })
+
+@app.route('/api/toggle_pid', methods=['POST'])
+def toggle_pid():
+    data = request.json
+    # Esperamos recibir JSON: {'estado': 1} o {'estado': 0}
+    estado = 1 if data.get('estado') else 0
+    
+    # Enviamos el comando: "set ena 1" o "set ena 0"
+    cmd = f"set ena {estado}"
+    
+    # Usar la función enviar_uart (la que tiene el Lock)
+    respuesta = enviar_uart(cmd)
+    
+    return jsonify({'status': 'ok', 'device_response': respuesta})
 
 
 if __name__ == '__main__':
