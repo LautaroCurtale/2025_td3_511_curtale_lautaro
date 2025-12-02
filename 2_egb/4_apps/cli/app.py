@@ -36,13 +36,14 @@ def main():
                     case "2": msg += " spo" # Setpoint
                     case "3": msg += " pen" # Pendiente
                     case "4": msg += " bde" # Banda de Error
-                    case "5": menu = 0
+                    case "5": ena +- " ena" # Habilitar PID
+                    case "6": menu = 0
                     case _:
                         print("\nOpción invalida")
                         flush_stdin()
                         input("Presione tecla para continuar...")
                 
-                if opc in ["1", "2", "3", "4"]:
+                if opc in ["1", "2", "3", "4", "5"]:
                     ok = 0
                     match opc:
                         case "1": # Tipo de Entrada
@@ -104,6 +105,17 @@ def main():
                                     print("Formato inválido. Ej: 2.5")
                             val = round(val, 2)
                             msg = f"{msg} {val}"
+                        case "5": # Habilitar PID
+                            while ok == 0:
+                                print("-------------------------------------------------")
+                                print("Control PID:")
+                                flush_stdin()
+                                val = input("[0=Apagar, 1=Encender]: ").strip()
+                                if val in ["0", "1"]:
+                                    ok = 1
+                                else:
+                                    print("Valor inválido. Use 0 o 1.")
+                            msg = f"{msg} {val}" # Construye "set ena 1"
 
                     print("-------------------------------------------------")
                     print(f"Enviado por UART: {msg}")
@@ -164,10 +176,11 @@ def menu_set():
     print("2> Setpoint (Ángulo)")
     print("3> Pendiente (Velocidad Rampa)")
     print("4> Banda de Error (LEDs)")
-    print("5> Volver al menu anterior")
+    print("5> Habilitar/Deshabilitar PID")
+    print("6> Volver al menu anterior")
     print("-------------------------------------------------")
     flush_stdin()
-    return input("Opción [1-5]: ").strip()
+    return input("Opción [1-6]: ").strip()
 
 # MODIFICADO: menu_get
 def menu_get():
