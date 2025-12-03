@@ -10,7 +10,7 @@ uart_lock = Lock()
 DEV_PATH = "/dev/egb"
 
 def enviar_uart(cmd):
-    with uart_lock:         # <--- 3. Usar el candado aquí
+    with uart_lock:
         try:
             # Escribir comando
             with open(DEV_PATH, "w") as dev:
@@ -51,7 +51,7 @@ def set_config():
     respuesta = enviar_uart(mensaje)
     return jsonify({'status': 'ok', 'device_response': respuesta})
 
-# --- NUEVO: API PARA ENVIAR TODO JUNTO ---
+# API PARA ENVIAR COMPLETO
 @app.route('/api/set_all', methods=['POST'])
 def set_all_config():
     data = request.json
