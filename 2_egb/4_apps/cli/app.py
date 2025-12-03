@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Nombre: app.py
-import os, re, sys, termios
+import os, re, sys, termios, time
 
 # MODIFICADO: Apunta al nuevo device file
 DEV_PATH = "/dev/egb" 
@@ -197,13 +197,33 @@ def menu_get():
 
 def enviar_uart(msg):
     try:
+        # 1. Escribir el mensaje
         with open(DEV_PATH, "w") as dev:
             dev.write(msg + "\n")
         
-        # Espera la respuesta
+        # 2. ESPERAR UN POCO (Crucial para dar tiempo al firmware)
+        time.sleep(0.1) 
+        
+        # 3. Leer todo lo que haya en el buffer
         with open(DEV_PATH, "r") as dev:
-            resp = dev.read().strip()
-        return resp
+            contenido = dev.read().strip()
+            
+        # 4. FILTRAR EL ECO
+        # Si la respuesta contiene el mensaje que enviamos, intentamos separarlo
+        if msg in contenido:
+            # Separamos por saltos de linea y buscamos algo que NO sea el mensaje
+            lineas = contenido.split('\n')
+            for linea in lineas:
+                linea_limpia = linea.strip()
+                # Si la linea tiene datos y NO es exactamente lo que mandamos
+                if len(linea_limpia) > 0 and linea_limpia != msg.strip():
+                    return linea_limpia
+            
+            # Si solo estaba el eco y nada más...
+            return "Esperando..."
+            
+        return contenido
+        
     except Exception as e:
         return f"Error de E/S: {e}"
 
