@@ -110,8 +110,8 @@ typedef enum {
 
 typedef struct {
     i2c_dev_t dispositivo;
-    void *data_in;    // Datos a enviar (si aplica)
-    void *data_out;   // Buffer para leer datos (si aplica)
+    void *data_in;    // Datos a enviar
+    void *data_out;   // Buffer para leer datos
     SemaphoreHandle_t done; // Semáforo para esperar respuesta
 } i2c_guard_t;
 
@@ -159,7 +159,7 @@ void task_i2c_guard(void *params) {
                     break;
                 case I2C_ENCODER:
                     float *ang = (float*)req.data_out;
-                    *ang = (float)get_angle_position(i2c0);  // Usa funciones internas del as5600.c
+                    *ang = (float)get_angle_position(i2c0);
                     break;
                 case I2C_RTC:
                     time_t *t = (time_t*)req.data_out;
@@ -235,7 +235,7 @@ void task_control_pid(void *params) {
     float error_aceptable = 1.0f;
 
     while (1) {
-        // Peek: Lee el valor sin eliminarlo, y sin esperar (0 ticks)
+        // Lee el valor sin eliminarlo, y sin esperar
         xQueuePeek(q_config, &configuracion_actual, 0);
         bool cmd;
         if (xQueuePeek(q_pid_enable, &cmd, 0)) pid_enable = cmd;
@@ -297,7 +297,7 @@ void task_control_pid(void *params) {
 // Task: Flags (LEDs)
 void task_flags(void *params) {
     while (1) {
-        // Peek: Lee el valor sin eliminarlo, y sin esperar (0 ticks)
+        // Lee el valor sin eliminarlo, y sin esperar
         xQueuePeek(q_config, &configuracion_actual, 0);
         float ang;
         float banda = configuracion_actual.banda_error;
@@ -370,7 +370,7 @@ void task_keyboard(void *params) {
     resultado_t res;
 
     while (1) {
-            // 1. Leer la configuración actual de la cola (sincronización)
+            // Lee la configuración actual de la cola
             xQueuePeek(q_config, &configuracion_actual, 0); 
             
             char tecla = escanear_teclado();
@@ -406,7 +406,7 @@ void task_keyboard(void *params) {
                         
                     case 'C': // Ver Configuración Actual
                         snprintf(msg.linea1, 16, "Salida:%c       ", configuracion_actual.tipo_entrada ? 'R' : 'E');
-                        snprintf(msg.linea2, 16, "SP:%3.0f P:%3.0f", configuracion_actual.setpoint, configuracion_actual.pendiente);
+                        snprintf(msg.linea2, 16, "SP:%3.0f P:%3.0f    ", configuracion_actual.setpoint, configuracion_actual.pendiente);
                         xQueueSend(q_lcd, &msg, 0);
                         break;
                         
@@ -443,8 +443,6 @@ void task_keyboard(void *params) {
                         res.setpoint = configuracion_actual.setpoint;
                         xQueuePeek(q_pid, &res.salida_control, 0);
                         res.tipo_entrada = configuracion_actual.tipo_entrada;
-                        
-                        // Flag LED (Convergencia) - Usando 8.0 grados fijo como en tu original
                         res.flag_led = (fabsf(configuracion_actual.setpoint - res.angulo) <= 8.0f) ? 1 : 0;
                         
                         // Obtener hora desde RTC
@@ -477,7 +475,7 @@ void task_keyboard(void *params) {
                 }
             } else if (estado_menu == 1) { // Seleccionar Tipo de Salida
                 if (tecla == '1' || tecla == '2') {
-                    // Actualiza el tipo de entrada en la global (temporalmente)
+                    // Actualiza el tipo de entrada en la global
                     configuracion_actual.tipo_entrada = tecla == '2'; 
                     snprintf(msg.linea1, 16, "Setpoint:      ");
                     snprintf(msg.linea2, 16, "               ");
@@ -546,9 +544,6 @@ void task_keyboard(void *params) {
                     xQueueSend(q_lcd, &msg, 0);
                     estado_menu = 0;
                 } else if (tecla == '*') { // Cancelar
-                    // Si cancela, vuelve al tipo de entrada anterior si Pendiente no se guarda.
-                    // Si se había seleccionado Rampa, pero cancela Pendiente,
-                    // puede ser conveniente volver a Escalón.
                     if (configuracion_actual.pendiente == 0) {
                         configuracion_actual.tipo_entrada = 0;
                     }
@@ -564,7 +559,7 @@ void task_keyboard(void *params) {
 // Task UART
 void task_uart(void *params) {
     char in_buff[BUFF_SIZE], out_buff[BUFF_SIZE]; // Buffers de recepcion y envio
-    // Tabla con las variables a verificar (7 elementos)
+    // Tabla con las variables a verificar (8 elementos)
     const var_map_t var_map[] = { 
         {"spo", VAR_SPO},
         {"tip", VAR_TIP},
@@ -576,12 +571,12 @@ void task_uart(void *params) {
         {"ena", VAR_ENA},
     };
     char *tipo, *variable, *dato; // Variables a obtener por UART
-    uint8_t i = 0, j, recepcion = 0, error = 0; // Se elimina 'inicio'
+    uint8_t i = 0, j, recepcion = 0, error = 0;
     cmd_tipo_t tipo_i;
     cmd_variable_t variable_i;
     // Variables para configurar y obtener datos
     configuracion_t config_uart;
-    resultado_t result_uart; // Usaremos solo los campos angulo, salida_control y error
+    resultado_t result_uart;
 
     // Leer la configuración actual al inicio de la tarea (si existe)
     xQueuePeek(q_config, &config_uart, 0); 
@@ -616,18 +611,18 @@ void task_uart(void *params) {
             dato = strtok(NULL, " ");
 
             
-            // 1. Obtener la última configuración y los últimos resultados
+            // Obtener la última configuración y los últimos resultados
             xQueuePeek(q_config, &config_uart, 0); 
             xQueuePeek(q_angulo, &result_uart.angulo, 0); 
             xQueuePeek(q_pid, &result_uart.salida_control, 0);
 
-            // 3. Calcular Error (Necesita Setpoint y Ángulo)
+            // Calcular Error (Necesita Setpoint y Ángulo)
             float error_ang = config_uart.setpoint - result_uart.angulo;
             if (error_ang > 180.0f) error_ang -= 360.0f;
             else if (error_ang < -180.0f) error_ang += 360.0f;
             result_uart.error = fabsf(error_ang);
             
-            // 2. Verificamos tipo de comando
+            // Verificamos tipo de comando
             if(!error) {
                 if(!strcmp(tipo, "get")) {
                     tipo_i = CMD_GET;
@@ -638,9 +633,9 @@ void task_uart(void *params) {
                 }
             }
             
-            // 3. Verificamos tipo de variable (CORRECCIÓN: límite a 8)
+            // Verificamos tipo de variable
             if(!error && variable != NULL) {
-                for(j = 0; j < 8; j++) { // j < 7: Solo hay 7 elementos
+                for(j = 0; j < 8; j++) {
                     if(!strcmp(variable, var_map[j].cmd)) {
                         variable_i = var_map[j].var;
                         break;
@@ -651,7 +646,7 @@ void task_uart(void *params) {
                 error = 3; // Error si falta la variable
             }
 
-            // 4. Procesamiento GET/SET (Modo Operación)
+            // Procesamiento GET/SET (Modo Operación)
             if(!error) {
                 // Cálculo de error para respuesta GET
                 float error_ang = config_uart.setpoint - result_uart.angulo;
@@ -666,7 +661,12 @@ void task_uart(void *params) {
                         case VAR_PEN: sprintf(out_buff, "P=%3.0f\n", config_uart.pendiente); break;
                         case VAR_BDE: sprintf(out_buff, "BE=%2.0f\n", config_uart.banda_error); break;
                         // Valores dinámicos (resultados)
-                        case VAR_PWM: sprintf(out_buff, "PWM=%3.0f\n", result_uart.salida_control); break;
+                        case VAR_PWM: 
+                        // La salida interna va de -1000 a 1000.
+                        // Dividimos por 10.0 para obtener el porcentaje (-100.0% a 100.0%)
+                        float duty = result_uart.salida_control / 10.0f;
+                        sprintf(out_buff, "PWM=%3.1f\n", duty); 
+                        break;
                         case VAR_ANG: sprintf(out_buff, "ANG=%3.0f\n", result_uart.angulo); break;
                         case VAR_ERR: sprintf(out_buff, "ERR=%3.0f\n", result_uart.error); break;
                         default: error = 3; break;
@@ -676,12 +676,11 @@ void task_uart(void *params) {
                         error = 4; // Error de dato faltante
                     } else {
                         switch(variable_i) {
-                            // CORRECCIÓN: Se usa & y se trabaja sobre config_uart (que luego se actualiza en q_config)
                             case VAR_SPO: sscanf(dato, "%f", &config_uart.setpoint); break;
                             case VAR_PEN: sscanf(dato, "%f", &config_uart.pendiente); break;
                             case VAR_BDE: sscanf(dato, "%f", &config_uart.banda_error); break;
                             case VAR_TIP: sscanf(dato, "%d", &config_uart.tipo_entrada); break;
-                            case VAR_SON:
+                            case VAR_ENA:
                                 int val_enable;
                                 sscanf(dato, "%d", &val_enable);
                                 bool cmd_bool = (val_enable > 0);
@@ -773,7 +772,6 @@ void task_init(void *params) {
     q_pid_enable = xQueueCreate(1, sizeof(bool));
     q_config = xQueueCreate(1, sizeof(configuracion_t));
 
-    // Paso Crítico: Cargar la configuración inicial
     xQueueOverwrite(q_config, &configuracion_actual);
 
     vTaskDelete(NULL);
