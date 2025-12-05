@@ -1,0 +1,1 @@
+savedcmd_/home/lautaro/3_gpos/build/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/lautaro/3_gpos/build/Module.symvers -n -T /home/lautaro/3_gpos/build/modules.order -i Module.symvers -e 
