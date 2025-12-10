@@ -60,6 +60,7 @@ typedef enum {
     DATALOGGER_LOAD_RESULT
 } datalogger_cmd_t;
 
+//Estructuras Dispositivos
 typedef struct {
     datalogger_cmd_t cmd;
     void *data; // configuracion_t* o resultado_t*
